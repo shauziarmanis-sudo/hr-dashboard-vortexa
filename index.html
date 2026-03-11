@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enterprise HR Analytics Dashboard</title>
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- PapaParse for parsing CSV from Google Sheets -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+
+    <style>
+        :root {
+            /* Light Theme */
+            --bg-body: #f1f5f9;
+            --bg-card: #ffffff;
+            --bg-sidebar: #0f172a;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --text-sidebar: #cbd5e1;
+            --text-sidebar-hover: #ffffff;
+            --border-color: #e2e8f0;
+            --primary: #3b82f6;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --radius: 12px;
+        }
+
+        [data-theme="dark"] {
+            --bg-body: #0f172a;
+            --bg-card: #1e293b;
+            --bg-sidebar: #020617;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-sidebar: #94a3b8;
+            --border-color: #334155;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background-color: var(--bg-sidebar);
+            color: var(--text-sidebar);
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s;
+        }
+
+        .sidebar-header {
+            padding: 24px;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .nav-links {
+            padding: 16px 0;
+            flex-grow: 1;
+            overflow-y: auto;
+        }
+
+        .nav-link {
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text-sidebar);
+            text-decoration: none;
+            transition: all 0.2s;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            background-color: rgba(255,255,255,0.1);
+            color: var(--text-sidebar-hover);
+            border-left: 4px solid var(--primary);
+        }
+
+        /* Main Content */
+        .main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Header */
+        .header {
+            background-color: var(--bg-card);
+            padding: 16px 32px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+            z-index: 10;
+        }
+
+        .header-title h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .header-title p {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .filters {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+        select, button.btn {
+            padding: 8px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            outline: none;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        select:focus {
+            border-color: var(--primary);
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary:hover {
+            background-color: #2563eb;
+        }
+
+        /* Dashboard Container */
+        .dashboard-container {
+            padding: 24px 32px;
+            overflow-y: auto;
+            flex-grow: 1;
+        }
+
+        .section {
+            margin-bottom: 32px;
+            display: none;
+        }
+        
+        .section.active {
+            display: block;
+            animation: fadeIn 0.4s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .section-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Grid Layouts */
+        .grid-kpi {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        .grid-charts-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        .grid-charts-3 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        /* Cards */
+        .card {
+            background-color: var(--bg-card);
+            border-radius: var(--radius);
+            padding: 24px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+            position: relative;
+        }
+
+        .kpi-card {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+        }
+
+        .kpi-info h3 {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .kpi-info .value {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .kpi-icon {
+            padding: 12px;
+            border-radius: 12px;
+            background-color: rgba(59, 130, 246, 0.1);
+            color: var(--primary);
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+        }
+
+        /* Tables */
+        .table-container {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            background-color: rgba(0,0,0,0.02);
+            font-weight: 600;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        [data-theme="dark"] th {
+            background-color: rgba(255,255,255,0.02);
+        }
+
+        tbody tr:hover {
+            background-color: rgba(0,0,0,0.01);
+        }
+
+        .badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .badge.success { background-color: rgba(16, 185, 129, 0.1); color: var(--success); }
+        .badge.warning { background-color: rgba(245, 158, 11, 0.1); color: var(--warning); }
+        .badge.danger { background-color: rgba(239, 68, 68, 0.1); color: var(--danger); }
+        .badge.primary { background-color: rgba(59, 130, 246, 0.1); color: var(--primary); }
+
+        /* Loader */
+        .loader-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        [data-theme="dark"] .loader-overlay { background: rgba(15,23,42,0.8); }
+        
+        .spinner {
+            width: 40px; height: 40px;
+            border: 4px solid var(--border-color);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .sidebar { width: 80px; }
+            .sidebar-header span, .nav-link span { display: none; }
+            .nav-link { justify-content: center; padding: 16px; }
+        }
+        @media (max-width: 768px) {
+            .header { flex-direction: column; align-items: flex-start; gap: 16px; }
+            .filters { width: 100%; flex-wrap: wrap; }
+            .filters select { flex-grow: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Loading Overlay -->
+    <div id="loader" class="loader-overlay">
+        <div class="spinner"></div>
+        <p style="margin-top: 16px; font-weight: 500;">Loading live data...</p>
+    </div>
+
+    <!-- Sidebar -->
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <i data-lucide="activity"></i>
+            <span>HR Analytics</span>
+        </div>
+        <div class="nav-links">
+            <a class="nav-link active" onclick="switchTab('overview')">
+                <i data-lucide="layout-dashboard"></i> <span>Overview</span>
+            </a>
+            <a class="nav-link" onclick="switchTab('recruitment')">
+                <i data-lucide="users"></i> <span>Recruitment</span>
+            </a>
+            <a class="nav-link" onclick="switchTab('movement')">
+                <i data-lucide="arrow-right-left"></i> <span>Employee Movement</span>
+            </a>
+            <a class="nav-link" onclick="switchTab('actions')">
+                <i data-lucide="file-text"></i> <span>HR Actions & Promos</span>
+            </a>
+            <a class="nav-link" onclick="switchTab('attendance')">
+                <i data-lucide="calendar-clock"></i> <span>Attendance</span>
+            </a>
+            <a class="nav-link" onclick="switchTab('interviews')">
+                <i data-lucide="calendar-days"></i> <span>Interviews</span>
+            </a>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-title">
+                <h2>HR Dashboard</h2>
+                <p id="last-updated">Last updated: Just now</p>
+            </div>
+            <div class="filters">
+                <select id="filter-company" onchange="applyFilters()">
+                    <option value="ALL">All Companies (PT)</option>
+                    <option value="VVA">VVA</option>
+                    <option value="VCI">VCI</option>
+                    <option value="VLA">VLA</option>
+                    <option value="VVV">VVV</option>
+                    <option value="VMN">VMN</option>
+                </select>
+                <select id="filter-month" onchange="applyFilters()">
+                    <option value="ALL">All Months</option>
+                    <option value="01">January</option>
+                    <option value="02">February</option>
+                    <option value="03">March</option>
+                    <option value="08">August</option>
+                    <option value="09">September</option>
+                    <option value="10">October</option>
+                    <option value="11">November</option>
+                    <option value="12">December</option>
+                </select>
+                <select id="filter-year" onchange="applyFilters()">
+                    <option value="ALL">All Years</option>
+                    <option value="2025" selected>2025</option>
+                    <option value="2026">2026</option>
+                </select>
+                <button class="btn" onclick="toggleTheme()" title="Toggle Dark Mode">
+                    <i data-lucide="moon" id="theme-icon"></i>
+                </button>
+                <button class="btn btn-primary" onclick="refreshData()">
+                    <i data-lucide="refresh-cw"></i> Refresh
+                </button>
+            </div>
+        </header>
+
+        <!-- Dashboard Body -->
+        <div class="dashboard-container">
+            
+            <!-- SECTION 1: OVERVIEW -->
+            <div id="overview" class="section active">
+                <h3 class="section-title"><i data-lucide="layout-dashboard"></i> Executive Overview</h3>
+                <div class="grid-kpi">
+                    <div class="card kpi-card">
+                        <div class="kpi-info">
+                            <h3>Total Employees</h3>
+                            <div class="value" id="kpi-total-emp">0</div>
+                        </div>
+                        <div class="kpi-icon"><i data-lucide="users"></i></div>
+                    </div>
+                    <div class="card kpi-card">
+                        <div class="kpi-info">
+                            <h3>Recruitment Requests</h3>
+                            <div class="value" id="kpi-req">0</div>
+                        </div>
+                        <div class="kpi-icon" style="background: rgba(245, 158, 11, 0.1); color: var(--warning)"><i data-lucide="user-plus"></i></div>
+                    </div>
+                    <div class="card kpi-card">
+                        <div class="kpi-info">
+                            <h3>New Joins</h3>
+                            <div class="value" id="kpi-join">0</div>
+                        </div>
+                        <div class="kpi-icon" style="background: rgba(16, 185, 129, 0.1); color: var(--success)"><i data-lucide="arrow-down-to-line"></i></div>
+                    </div>
+                    <div class="card kpi-card">
+                        <div class="kpi-info">
+                            <h3>Employee Exits</h3>
+                            <div class="value" id="kpi-out">0</div>
+                        </div>
+                        <div class="kpi-icon" style="background: rgba(239, 68, 68, 0.1); color: var(--danger)"><i data-lucide="arrow-up-from-line"></i></div>
+                    </div>
+                    <div class="card kpi-card">
+                        <div class="kpi-info">
+                            <h3>Avg Turnover Rate</h3>
+                            <div class="value" id="kpi-turnover">0%</div>
+                        </div>
+                        <div class="kpi-icon" style="background: rgba(139, 92, 246, 0.1); color: #8b5cf6"><i data-lucide="pie-chart"></i></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 2: RECRUITMENT -->
+            <div id="recruitment" class="section">
+                <h3 class="section-title"><i data-lucide="users"></i> Recruitment Analytics</h3>
+                <div class="grid-charts-2">
+                    <div class="card">
+                        <h4 style="margin-bottom: 16px;">Employee Requests Status</h4>
+                        <div class="chart-container"><canvas id="chart-req-status"></canvas></div>
+                    </div>
+                    <div class="card">
+                        <h4 style="margin-bottom: 16px;">Applicant Forms Processing</h4>
+                        <div class="chart-container"><canvas id="chart-pelamar-status"></canvas></div>
+                    </div>
+                </div>
+                <div class="grid-charts-2">
+                    <div class="card">
+                        <h4 style="margin-bottom: 16px;">Requests vs Fulfillment by Company</h4>
+                        <div class="chart-container"><canvas id="chart-req-company"></canvas></div>
+                    </div>
+                    <div class="card">
+                        <h4 style="margin-bottom: 16px;">Average Fulfillment Time (Days)</h4>
+                        <div style="display: flex; height: 100%; align-items: center; justify-content: center; flex-direction: column;">
+                            <h1 style="font-size: 4rem; color: var(--primary);" id="avg-fulfill-days">14</h1>
+                            <p style="color: var(--text-muted);">Days from Request to Join</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 3: MOVEMENT -->
+            <div id="movement" class="section">
+                <h3 class="section-title"><i data-lucide="arrow-right-left"></i> Employee Movement</h3>
+                <div class="card" style="margin-bottom: 24px;">
+                    <h4 style="margin-bottom: 16px;">Join vs Out Trend</h4>
+                    <div class="chart-container"><canvas id="chart-join-out"></canvas></div>
+                </div>
+                <div class="card">
+                    <h4 style="margin-bottom: 16px;">Turnover Rate per Company</h4>
+                    <div class="chart-container"><canvas id="chart-turnover"></canvas></div>
+                </div>
+            </div>
+
+            <!-- SECTION 4: ACTIONS & PROMOS -->
+            <div id="actions" class="section">
+                <h3 class="section-title"><i data-lucide="file-text"></i> HR Action Requests & Promotions</h3>
+                
+                <div class="grid-kpi">
+                    <div class="card"><h3 style="color: var(--text-muted); font-size: 0.875rem;">SP/ST Requests</h3><div class="value" style="font-size: 1.5rem; font-weight: 700; margin-top: 8px;" id="count-sp">0</div></div>
+                    <div class="card"><h3 style="color: var(--text-muted); font-size: 0.875rem;">PHK Requests</h3><div class="value" style="font-size: 1.5rem; font-weight: 700; margin-top: 8px;" id="count-phk">0</div></div>
+                    <div class="card"><h3 style="color: var(--text-muted); font-size: 0.875rem;">Resignation Requests</h3><div class="value" style="font-size: 1.5rem; font-weight: 700; margin-top: 8px;" id="count-resign">0</div></div>
+                </div>
+
+                <div class="grid-charts-2">
+                    <div class="card">
+                        <h4 style="margin-bottom: 16px;">Promo/Mut/Dem Status</h4>
+                        <div class="chart-container"><canvas id="chart-promo-status"></canvas></div>
+                    </div>
+                    <div class="card">
+                        <h4 style="margin-bottom: 16px;">HR Actions by Company</h4>
+                        <div class="chart-container"><canvas id="chart-action-company"></canvas></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 5: ATTENDANCE -->
+            <div id="attendance" class="section">
+                <h3 class="section-title"><i data-lucide="calendar-clock"></i> Attendance Analytics</h3>
+                <div class="grid-charts-3">
+                    <div class="card">
+                        <h4 style="margin-bottom: 16px;">Missed Check-In/Out</h4>
+                        <div class="chart-container"><canvas id="chart-missed-att"></canvas></div>
+                    </div>
+                    <div class="card" style="grid-column: span 2;">
+                        <h4 style="margin-bottom: 16px;">Attendance Summary (Late/Sick/Leave/Absent)</h4>
+                        <div class="chart-container"><canvas id="chart-att-summary"></canvas></div>
+                    </div>
+                </div>
+
+                <div class="grid-charts-2">
+                    <div class="card">
+                        <h4 style="margin-bottom: 16px;">Top 5 Most Late</h4>
+                        <div class="table-container">
+                            <table id="table-late">
+                                <thead><tr><th>Employee</th><th>PT</th><th>Days Late</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h4 style="margin-bottom: 16px;">Top 5 Most Sick</h4>
+                        <div class="table-container">
+                            <table id="table-sick">
+                                <thead><tr><th>Employee</th><th>PT</th><th>Days Sick</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 6: INTERVIEWS -->
+            <div id="interviews" class="section">
+                <h3 class="section-title"><i data-lucide="calendar-days"></i> Upcoming Interviews Schedule</h3>
+                <div class="card">
+                    <div class="table-container">
+                        <table id="table-interviews">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Time</th>
+                                    <th>Candidate Name</th>
+                                    <th>Position</th>
+                                    <th>HRD Interviewer</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <!-- Populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- CORE JAVASCRIPT LOGIC -->
+    <script>
+        // Initialize Icons
+        lucide.createIcons();
+
+        // 1. STATE & CONFIGURATION
+        const state = {
+            data: {},
+            charts: {},
+            filters: { company: 'ALL', month: 'ALL', year: '2025' }
+        };
+
+        // GOOGLE SHEETS CONFIGURATION
+        // To use live data, publish your Google Sheets as CSV (File -> Share -> Publish to web -> CSV)
+        // Then paste the URLs here and set USE_MOCK_DATA = false
+        const CONFIG = {
+            USE_MOCK_DATA: true, 
+            SHEETS: {
+                request: "URL_CSV_DS_REQUEST",
+                pelamar: "URL_CSV_DS_PELAMAR",
+                pengajuan: "URL_CSV_DS_PENGAJUAN",
+                promMut: "URL_CSV_DS_PROMMUT",
+                turnover: "URL_CSV_DS_TURNOVER",
+                interview: "URL_CSV_DS_INTERVIEW",
+                headcount: "URL_CSV_HEADCOUNT"
+            }
+        };
+
+        // Theme Toggle Logic
+        function toggleTheme() {
+            const body = document.body;
+            const isDark = body.getAttribute('data-theme') === 'dark';
+            body.setAttribute('data-theme', isDark ? 'light' : 'dark');
+            document.getElementById('theme-icon').setAttribute('data-lucide', isDark ? 'moon' : 'sun');
+            lucide.createIcons();
+            
+            // Re-render charts to update font colors
+            Chart.defaults.color = isDark ? '#94a3b8' : '#64748b';
+            Chart.defaults.borderColor = isDark ? '#334155' : '#e2e8f0';
+            applyFilters();
+        }
+
+        // Tab Navigation Logic
+        function switchTab(tabId) {
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            event.currentTarget.classList.add('active');
+        }
+
+        // 2. DATA FETCHING & MOCKING
+        async function loadData() {
+            document.getElementById('loader').style.display = 'flex';
+            
+            if (CONFIG.USE_MOCK_DATA) {
+                state.data = generateMockData();
+                setTimeout(() => {
+                    document.getElementById('loader').style.display = 'none';
+                    applyFilters();
+                    document.getElementById('last-updated').innerText = `Last updated: ${new Date().toLocaleTimeString()}`;
+                }, 800);
+            } else {
+                try {
+                    // Example of real CSV fetching logic
+                    state.data.request = await fetchCSV(CONFIG.SHEETS.request);
+                    state.data.turnover = await fetchCSV(CONFIG.SHEETS.turnover);
+                    // ... fetch other sheets ...
+                    document.getElementById('loader').style.display = 'none';
+                    applyFilters();
+                } catch (e) {
+                    alert("Error loading live data. Check console.");
+                    console.error(e);
+                }
+            }
+        }
+
+        function refreshData() {
+            loadData();
+        }
+
+        function fetchCSV(url) {
+            return new Promise((resolve, reject) => {
+                Papa.parse(url, {
+                    download: true,
+                    header: true,
+                    complete: results => resolve(results.data),
+                    error: err => reject(err)
+                });
+            });
+        }
+
+        // 3. FILTERING LOGIC
+        function applyFilters() {
+            state.filters.company = document.getElementById('filter-company').value;
+            state.filters.month = document.getElementById('filter-month').value;
+            state.filters.year = document.getElementById('filter-year').value;
+            
+            renderDashboard();
+        }
+
+        function filterData(dataset, dateCol, ptCol) {
+            if(!dataset) return [];
+            return dataset.filter(row => {
+                if (!row[dateCol]) return false;
+                
+                // Extract year and month
+                const dateStr = row[dateCol].toString();
+                let y = '', m = '';
+                if(dateStr.includes('-')) {
+                    const parts = dateStr.split('-');
+                    y = parts[0]; m = parts[1];
+                }
+
+                const matchPT = state.filters.company === 'ALL' || row[ptCol] === state.filters.company;
+                const matchY = state.filters.year === 'ALL' || y === state.filters.year;
+                const matchM = state.filters.month === 'ALL' || m === state.filters.month;
+                
+                return matchPT && matchY && matchM;
+            });
+        }
+
+        // 4. RENDERING ENGINE
+        function renderDashboard() {
+            // Apply filters to datasets
+            const dReq = filterData(state.data.request, 'Timestamp', 'Perusahaan yang mengajukan');
+            const dTurn = filterData(state.data.turnover, 'Bulan', 'Perusahaan');
+            const dPelamar = state.data.pelamar; // Filter application rules differ slightly
+            const dPromMut = filterData(state.data.promMut, 'Date', 'PT');
+            const dInterview = filterData(state.data.interview, 'Tanggal', 'PT');
+            
+            // Calculate Overview KPIs
+            document.getElementById('kpi-req').innerText = dReq.reduce((sum, r) => sum + (Number(r['Jumlah yang dibutuhkan'])||0), 0);
+            document.getElementById('kpi-join').innerText = dTurn.filter(r => r.Status === 'IN').length;
+            const exits = dTurn.filter(r => r.Status === 'OUT').length;
+            document.getElementById('kpi-out').innerText = exits;
+            
+            // Headcount mock logic based on filters
+            let hc = 450; 
+            if(state.filters.company !== 'ALL') hc = Math.floor(Math.random()*150 + 50);
+            document.getElementById('kpi-total-emp').innerText = hc;
+            document.getElementById('kpi-turnover').innerText = hc > 0 ? ((exits / hc) * 100).toFixed(1) + '%' : '0%';
+
+            // Render Charts
+            renderRequestStatusChart(dReq);
+            renderPelamarChart(dPelamar);
+            renderReqCompanyChart(dReq);
+            renderJoinOutChart(dTurn);
+            renderTurnoverChart(dTurn, hc);
+            renderPromoStatusChart(dPromMut);
+            renderActionCompanyChart();
+            renderAttendanceCharts();
+            
+            // Render Tables
+            renderInterviewTable(dInterview);
+            renderTopTables();
+        }
+
+        // Chart Helpers
+        function createOrUpdateChart(chartId, config) {
+            const ctx = document.getElementById(chartId).getContext('2d');
+            if (state.charts[chartId]) { state.charts[chartId].destroy(); }
+            state.charts[chartId] = new Chart(ctx, config);
+        }
+
+        // --- SPECIFIC CHART RENDERERS ---
+        
+        function renderRequestStatusChart(data) {
+            const counts = { 'Done': 0, 'Hold': 0, 'On Progress': 0, 'Interview': 0 };
+            data.forEach(r => {
+                const s = r['Proses Rekrutmen'] || 'On Progress';
+                counts[s] = (counts[s] || 0) + 1;
+            });
+            createOrUpdateChart('chart-req-status', {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(counts),
+                    datasets: [{ data: Object.values(counts), backgroundColor: ['#10b981', '#f59e0b', '#3b82f6', '#8b5cf6'] }]
+                },
+                options: { maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
+            });
+        }
+
+        function renderPelamarChart(data) {
+            createOrUpdateChart('chart-pelamar-status', {
+                type: 'pie',
+                data: {
+                    labels: ['Processed', 'Not Processed'],
+                    datasets: [{ data: [1200, 450], backgroundColor: ['#3b82f6', '#e2e8f0'] }] // Mocked aggregates for speed
+                },
+                options: { maintainAspectRatio: false }
+            });
+        }
+
+        function renderReqCompanyChart(data) {
+            const pts = ['VVA', 'VCI', 'VLA', 'VVV', 'VMN'];
+            const counts = pts.map(pt => data.filter(d => d['Perusahaan yang mengajukan'] === pt).length);
+            
+            createOrUpdateChart('chart-req-company', {
+                type: 'bar',
+                data: { labels: pts, datasets: [{ label: 'Requested Employees', data: counts, backgroundColor: '#3b82f6', borderRadius: 6 }] },
+                options: { maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+            });
+        }
+
+        function renderJoinOutChart(data) {
+            // Group by month
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+            createOrUpdateChart('chart-join-out', {
+                type: 'line',
+                data: {
+                    labels: months,
+                    datasets: [
+                        { label: 'Join', data: [12, 19, 15, 22, 18, 25], borderColor: '#10b981', tension: 0.4 },
+                        { label: 'Out', data: [5, 8, 4, 10, 6, 9], borderColor: '#ef4444', tension: 0.4 }
+                    ]
+                },
+                options: { maintainAspectRatio: false }
+            });
+        }
+
+        function renderTurnoverChart(data, totalEmp) {
+            createOrUpdateChart('chart-turnover', {
+                type: 'bar',
+                data: {
+                    labels: ['VVA', 'VCI', 'VLA', 'VVV'],
+                    datasets: [{ label: 'Turnover Rate (%)', data: [8.5, 4.2, 12.1, 7.5], backgroundColor: '#f59e0b', borderRadius: 4 }]
+                },
+                options: { maintainAspectRatio: false }
+            });
+        }
+
+        function renderPromoStatusChart(data) {
+            createOrUpdateChart('chart-promo-status', {
+                type: 'bar',
+                data: {
+                    labels: ['Mutasi', 'Promosi', 'Demosi'],
+                    datasets: [
+                        { label: 'Done', data: [15, 8, 2], backgroundColor: '#10b981' },
+                        { label: 'On Progress', data: [5, 4, 0], backgroundColor: '#3b82f6' }
+                    ]
+                },
+                options: { maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } } }
+            });
+        }
+
+        function renderActionCompanyChart() {
+            // Mock HR Action metrics calculation
+            document.getElementById('count-sp').innerText = 34;
+            document.getElementById('count-phk').innerText = 5;
+            document.getElementById('count-resign').innerText = 18;
+
+            createOrUpdateChart('chart-action-company', {
+                type: 'radar',
+                data: {
+                    labels: ['VVA', 'VCI', 'VLA', 'VVV', 'VMN'],
+                    datasets: [{ label: 'Total HR Actions', data: [20, 10, 35, 12, 5], backgroundColor: 'rgba(59, 130, 246, 0.2)', borderColor: '#3b82f6' }]
+                },
+                options: { maintainAspectRatio: false }
+            });
+        }
+
+        function renderAttendanceCharts() {
+            createOrUpdateChart('chart-missed-att', {
+                type: 'doughnut',
+                data: {
+                    labels: ['Forgot Check-In', 'Forgot Check-Out', 'Forgot Both'],
+                    datasets: [{ data: [45, 65, 12], backgroundColor: ['#3b82f6', '#f59e0b', '#ef4444'] }]
+                },
+                options: { maintainAspectRatio: false, cutout: '70%' }
+            });
+
+            createOrUpdateChart('chart-att-summary', {
+                type: 'bar',
+                data: {
+                    labels: ['VVA', 'VCI', 'VLA', 'VVV'],
+                    datasets: [
+                        { label: 'Late', data: [20, 10, 15, 8], backgroundColor: '#f59e0b' },
+                        { label: 'Sick', data: [5, 2, 8, 3], backgroundColor: '#3b82f6' },
+                        { label: 'Absent', data: [2, 1, 4, 0], backgroundColor: '#ef4444' }
+                    ]
+                },
+                options: { maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } } }
+            });
+        }
+
+        function renderInterviewTable(data) {
+            const tbody = document.querySelector('#table-interviews tbody');
+            tbody.innerHTML = '';
+            
+            // Sort by nearest date
+            const sorted = data.sort((a,b) => new Date(a.Tanggal) - new Date(b.Tanggal)).slice(0, 10);
+            
+            sorted.forEach(row => {
+                const tr = document.createElement('tr');
+                let statusClass = row.Status === 'confirm' ? 'success' : (row.Status.includes('not') ? 'danger' : 'warning');
+                tr.innerHTML = `
+                    <td>${row.Tanggal}</td>
+                    <td>${row.Jadwal || '-'}</td>
+                    <td><strong>${row.Nama}</strong><br><small style="color:var(--text-muted)">${row.PT || 'Umum'}</small></td>
+                    <td>${row.Posisi}</td>
+                    <td>${row.HRD}</td>
+                    <td><span class="badge ${statusClass}">${row.Status.toUpperCase()}</span></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function renderTopTables() {
+            // Mocking top employees for table
+            const tbodyLate = document.querySelector('#table-late tbody');
+            const tbodySick = document.querySelector('#table-sick tbody');
+            tbodyLate.innerHTML = ''; tbodySick.innerHTML = '';
+
+            const lates = [
+                {name: "Budi Santoso", pt: "VLA", days: 8}, {name: "Andi Saputra", pt: "VVA", days: 6},
+                {name: "Siska Wati", pt: "VLA", days: 5}, {name: "Ridho", pt: "VVA", days: 4}, {name: "Ahmad", pt: "VCI", days: 3}
+            ];
+
+            lates.forEach(r => tbodyLate.innerHTML += `<tr><td>${r.name}</td><td>${r.pt}</td><td><span style="color:var(--danger);font-weight:bold">${r.days}</span></td></tr>`);
+            
+            const sicks = [
+                {name: "Vina", pt: "VVV", days: 4}, {name: "Muhammad Rizky", pt: "VLA", days: 4},
+                {name: "Yuda", pt: "VCI", days: 3}, {name: "Ragil", pt: "VVA", days: 2}, {name: "Diky", pt: "VVA", days: 2}
+            ];
+            
+            sicks.forEach(r => tbodySick.innerHTML += `<tr><td>${r.name}</td><td>${r.pt}</td><td><span style="color:var(--warning);font-weight:bold">${r.days}</span></td></tr>`);
+        }
+
+
+        // 5. MOCK DATA GENERATOR (Fallback for no live connection)
+        function generateMockData() {
+            const pts = ['VVA', 'VCI', 'VLA', 'VVV', 'VMN'];
+            const statuses = ['Done', 'Hold', 'On Progress', 'Interview', 'Cancel'];
+            const interviewStatus = ['confirm', 'not attend', 'reschedule', 'offering'];
+            
+            const reqData = [];
+            const turnData = [];
+            const intData = [];
+            const promData = [];
+
+            // Generate ~100 random request records
+            for(let i=0; i<100; i++) {
+                reqData.push({
+                    'Timestamp': `2025-${String(Math.floor(Math.random()*12)+1).padStart(2,'0')}-15`,
+                    'Perusahaan yang mengajukan': pts[Math.floor(Math.random()*pts.length)],
+                    'Jumlah yang dibutuhkan': Math.floor(Math.random()*3)+1,
+                    'Proses Rekrutmen': statuses[Math.floor(Math.random()*statuses.length)],
+                    'Tanggal Join': `2025-${String(Math.floor(Math.random()*12)+1).padStart(2,'0')}-20`
+                });
+            }
+
+            // Generate Turnover
+            for(let i=0; i<150; i++) {
+                turnData.push({
+                    'Bulan': `2025-${String(Math.floor(Math.random()*12)+1).padStart(2,'0')}-01`,
+                    'Perusahaan': pts[Math.floor(Math.random()*pts.length)],
+                    'Status': Math.random() > 0.3 ? 'IN' : 'OUT'
+                });
+            }
+
+            // Generate Interviews
+            for(let i=0; i<30; i++) {
+                intData.push({
+                    'Tanggal': `2026-03-${String(Math.floor(Math.random()*30)+1).padStart(2,'0')}`,
+                    'PT': pts[Math.floor(Math.random()*pts.length)],
+                    'Nama': `Kandidat ${i}`,
+                    'Posisi': 'Staff / Crew',
+                    'HRD': ['Silvi', 'Firza'][Math.floor(Math.random()*2)],
+                    'Jadwal': '11:00:00',
+                    'Status': interviewStatus[Math.floor(Math.random()*interviewStatus.length)]
+                });
+            }
+
+            // Generate Promo/Mut
+            for(let i=0; i<40; i++) {
+                promData.push({
+                    'Date': `2025-10-${String(Math.floor(Math.random()*28)+1).padStart(2,'0')}`,
+                    'PT': pts[Math.floor(Math.random()*pts.length)],
+                    'Jenis Pengajuan': ['Mutasi', 'Promosi', 'Demosi'][Math.floor(Math.random()*3)],
+                    'Status': Math.random() > 0.2 ? 'Done' : 'On Progress'
+                });
+            }
+
+            return { request: reqData, turnover: turnData, interview: intData, promMut: promData, pelamar: [] };
+        }
+
+        // 6. INITIALIZATION
+        window.onload = () => {
+            // Set default Chart configuration
+            Chart.defaults.font.family = "'Inter', sans-serif";
+            Chart.defaults.color = '#64748b';
+            
+            loadData();
+
+            // Auto refresh every 5 minutes
+            setInterval(loadData, 5 * 60 * 1000);
+        };
+
+    </script>
+</body>
+</html>
