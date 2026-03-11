@@ -988,1334 +988,687 @@ tbody tr:hover{background:var(--surface2)}
 </div><!-- /app -->
 
 <script>
-/* ════════════════════════════════════════════════
-   HELPERS & CONSTANTS
-════════════════════════════════════════════════ */
-const CO = ['VVV','VVA','VLA','VCI','VMN'];
-const CO_C = {VVV:'#6366F1',VVA:'#3B82F6',VLA:'#10B981',VCI:'#8B5CF6',VMN:'#F59E0B'};
-const MONTHS = ['Agu 25','Sep 25','Okt 25','Nov 25','Des 25','Jan 26','Feb 26'];
-const CHARTS = {};
-
-function r(a,b){return Math.floor(Math.random()*(b-a+1))+a}
-function pick(arr){return arr[r(0,arr.length-1)]}
-function pct(a,b){return b?((a/b)*100).toFixed(1)+'%':'0%'}
-function mkDate(y,m,d){const dd=new Date(y,m-1,d);return dd.toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'})}
-function rDate(){const m=r(8,14);const y=m>12?2026:2025;return mkDate(y,m>12?m-12:m,r(1,28))}
-
-const PAGE_TITLES = {
-  req:'Permintaan Karyawan',pelamar:'Form Pelamar',pengajuan:'Form Pengajuan',
-  prommut:'Promosi / Mutasi / Demosi',interview:'Jadwal Interview',turnover:'Turnover',
-  absoverview:'Overview Absensi',absmanual:'Absen Manual',abslupa:'Lupa Absen',
-  absstatus:'Status Kehadiran',abstop10:'Top 10 Karyawan'
-};
-
-/* ════════════════════════════════════════════════
-   NAVIGATION
-════════════════════════════════════════════════ */
-function showPage(name, el){
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
-  document.getElementById('page-'+name).classList.add('active');
-  el.classList.add('active');
-  document.getElementById('pageTitle').textContent = PAGE_TITLES[name]||name;
-}
-
-/* ════════════════════════════════════════════════
-   THEME
-════════════════════════════════════════════════ */
-function toggleTheme(){
-  const html = document.documentElement;
-  const isDark = html.getAttribute('data-theme')==='dark';
-  html.setAttribute('data-theme', isDark?'light':'dark');
-  document.getElementById('themeLabel').textContent = isDark?'☀ Light':'🌙 Dark';
-  Chart.defaults.color = isDark?'#5A6380':'#8B91AC';
-  Chart.defaults.borderColor = isDark?'#E4E7EF':'#2A2E42';
-  Object.values(CHARTS).forEach(c=>c.update());
-}
-
-/* ════════════════════════════════════════════════
-   FILTER PT
-════════════════════════════════════════════════ */
-function filterPT(pt, el){
-  document.querySelectorAll('.pt-chip').forEach(c=>c.classList.remove('active'));
-  el.classList.add('active');
-  renderAll();
-}
-
-/* ════════════════════════════════════════════════
-   CHART HELPER
-════════════════════════════════════════════════ */
-function mkChart(id, type, data, opts={}){
-  if(CHARTS[id]) CHARTS[id].destroy();
-  const ctx = document.getElementById(id);
-  if(!ctx) return;
-  const isDark = document.documentElement.getAttribute('data-theme')==='dark';
-  const gc = isDark?'rgba(255,255,255,.05)':'rgba(0,0,0,.05)';
-  const tc = isDark?'#8B91AC':'#5A6380';
-  const defaults = {
-    responsive:true,
-    plugins:{legend:{labels:{color:tc,font:{size:11},padding:10},position:'bottom'}},
-    scales:{
-      x:{grid:{color:gc},ticks:{color:tc,font:{size:11}}},
-      y:{grid:{color:gc},ticks:{color:tc,font:{size:11}}}
-    }
-  };
-  if(type==='doughnut'||type==='pie') delete defaults.scales;
-  if(type==='bar'&&opts.indexAxis==='y') {
-    defaults.scales={y:{grid:{color:gc},ticks:{color:tc,font:{size:11}}},x:{grid:{color:gc},ticks:{color:tc,font:{size:11}}}};
-  }
-  const merged = deepMerge(JSON.parse(JSON.stringify(defaults)), opts);
-  CHARTS[id] = new Chart(ctx, {type, data, options:merged});
-}
-
-function deepMerge(t,s){
-  for(const k in s){
-    if(s[k]&&typeof s[k]==='object'&&!Array.isArray(s[k])){if(!t[k])t[k]={};deepMerge(t[k],s[k])}
-    else t[k]=s[k];
-  }
-  return t;
-}
-
-/* ════════════════════════════════════════════════
-   TABLE HELPERS
-════════════════════════════════════════════════ */
-function filterTbl(input, tbodyId){
-  const q = input.value.toLowerCase();
-  document.querySelectorAll('#'+tbodyId+' tr').forEach(tr=>{
-    tr.style.display = tr.textContent.toLowerCase().includes(q)?'':'none';
-  });
-}
-function filterTblSelect(sel, tbodyId, colIdx){
-  const v = sel.value.toLowerCase();
-  document.querySelectorAll('#'+tbodyId+' tr').forEach(tr=>{
-    const td = tr.querySelectorAll('td')[colIdx];
-    tr.style.display = (!v||!td||td.textContent.toLowerCase()===v)?'':'none';
-  });
-}
-
-/* ════════════════════════════════════════════════
-   CO TAG HELPER
-════════════════════════════════════════════════ */
-function coTag(pt){return `<span class="co-tag co-${pt}">${pt}</span>`}
-function statusTag(s){
-  const m={Done:'tag-done','On Progress':'tag-prog',Hold:'tag-hold',Cancel:'tag-hold',Pending:'tag-open',Gagal:'tag-open',Terpenuhi:'tag-done',Open:'tag-open'};
-  return `<span class="tag ${m[s]||'tag-hold'}">${s}</span>`;
-}
-function durTag(days){
-  const cls = days<=14?'dur-ok':days<=30?'dur-warn':'dur-crit';
-  return `<span class="dur ${cls}">${days} hr</span>`;
-}
-
-/* ════════════════════════════════════════════════
-   RENDER ALL
-════════════════════════════════════════════════ */
-function renderAll(){
-  renderReq();
-  renderPelamar();
-  renderPengajuanCharts();
-  renderPengajuanTable();
-  renderPromMut();
-  renderInterview();
-  renderTurnover();
-  renderAbsOverview();
-  renderAbsManual();
-  renderAbsLupa();
-  renderAbsStatus();
-  renderTop10('terlambat');
-}
-
-/* ════════════════════════════════════════════════
-   PAGE: PERMINTAAN KARYAWAN
-════════════════════════════════════════════════ */
-function renderReq(){
-  // Chart: Permintaan vs Terpenuhi per bulan (grouped bar)
-  mkChart('cReqFulfill','bar',{
-    labels: MONTHS,
-    datasets:[
-      {label:'Diminta',data:MONTHS.map(()=>r(10,28)),backgroundColor:'rgba(99,102,241,.5)',borderRadius:4},
-      {label:'Terpenuhi',data:MONTHS.map(()=>r(6,20)),backgroundColor:'rgba(16,185,129,.6)',borderRadius:4}
-    ]
-  },{plugins:{legend:{position:'bottom'}}});
-
-  // Chart: per PT bar
-  mkChart('cReqPT','bar',{
-    labels:CO,
-    datasets:[
-      {label:'Diminta',data:CO.map(()=>r(20,60)),backgroundColor:CO.map(c=>CO_C[c]+'88'),borderRadius:4},
-      {label:'Terpenuhi',data:CO.map(()=>r(10,45)),backgroundColor:CO.map(c=>CO_C[c]),borderRadius:4}
-    ]
-  },{plugins:{legend:{position:'bottom'}}});
-
-  // Join per bulan per PT
-  mkChart('cJoinMonth','bar',{
-    labels:MONTHS,
-    datasets:CO.map(c=>({label:c,data:MONTHS.map(()=>r(2,12)),backgroundColor:CO_C[c]+'bb',borderRadius:3}))
-  },{plugins:{legend:{position:'bottom'}}});
-
-  // Out per bulan per PT
-  mkChart('cOutMonth','bar',{
-    labels:MONTHS,
-    datasets:CO.map(c=>({label:c,data:MONTHS.map(()=>r(1,8)),backgroundColor:CO_C[c]+'88',borderRadius:3}))
-  },{plugins:{legend:{position:'bottom'}}});
-
-  // Open request table
-  const positions=['Pizza Cook','Driver Gudang','Kitchen Crew','SPV Outlet','Barista','Cook Helper','Cashier','Store Manager','Admin HR','IT Support'];
-  const levels=['Staff / Crew','Leader','Supervisor','Manager'];
-  const proses=['Screening CV','Interview','On Progress','Hold','Offering'];
-  const pics=['Silvi','Firza','Reza','Andi'];
-  const rows = Array.from({length:12},()=>{
-    const days=r(5,65);
-    const co=pick(CO);
-    return `<tr>
-      <td>${coTag(co)}</td>
-      <td>${pick(positions)}</td>
-      <td>${pick(levels)}</td>
-      <td><span class="tag tag-blue">${pick(['Additional','Replacement'])}</span></td>
-      <td>${rDate()}</td>
-      <td>${durTag(days)}</td>
-      <td>${statusTag(pick(proses))}</td>
-      <td>${pick(pics)}</td>
-    </tr>`;
-  });
-  document.getElementById('tblOpenReq').innerHTML = rows.join('');
-}
-
-/* ════════════════════════════════════════════════
-   PAGE: PELAMAR
-════════════════════════════════════════════════ */
-function renderPelamar(){
-  mkChart('cPelamarStatus','bar',{
-    labels:['Masuk','Interview HR','Interview User','Tes Skill','Offering','Kontrak/Join','Gagal'],
-    datasets:[{label:'Pelamar',data:[342,295,180,140,130,118,156],backgroundColor:['#6366F1bb','#3B82F6bb','#8B5CF6bb','#F59E0Bbb','#10B981bb','#10B981','#EF4444bb'],borderRadius:4}]
-  },{plugins:{legend:{display:false}}});
-
-  mkChart('cPelamarChannel','doughnut',{
-    labels:['LinkedIn','Referral','JobStreet','Instagram','Walk-in','OLX','Lainnya'],
-    datasets:[{data:[88,72,56,48,34,22,22],backgroundColor:['#6366F1','#3B82F6','#8B5CF6','#F59E0B','#10B981','#EF4444','#9CA3AF'],borderWidth:0,hoverOffset:6}]
-  },{});
-
-  const names=['Andi Pratama','Budi Santoso','Citra Dewi','Deni Kurniawan','Eka Rahayu','Fathur Rahman','Gita Sari','Hendra Wijaya'];
-  const positions=['Kitchen Crew','Barista','Driver','SPV Outlet','Admin HR','Cook Helper','Cashier','Store Manager'];
-  const brands=['Mini Calore','Pepero Pizza','Seoul Bakeshop','Minicalore','Obihiro'];
-  const statuses=['Gagal','Interview HR','Interview User','Offering Letter','Kontrak','Tes Skill','Join'];
-  document.getElementById('tblPelamar').innerHTML = Array.from({length:15},()=>{
-    const s=pick(statuses);
-    return `<tr>
-      <td>${pick(names)}</td><td>${pick(positions)}</td><td>${pick(brands)}</td>
-      <td>${rDate()}</td><td>${rDate()}</td>
-      <td>${Math.random()>.4?rDate():'—'}</td>
-      <td>${Math.random()>.6?rDate():'—'}</td>
-      <td>${statusTag(s)}</td>
-    </tr>`;
-  }).join('');
-}
-
-/* ════════════════════════════════════════════════
-   PAGE: PENGAJUAN
-════════════════════════════════════════════════ */
-function renderPengajuanCharts(){
-  const kat = ['SP 1','SP 2','SP 3','Surat Teguran','PHK / Resign','Promosi','Mutasi','Demosi','Perpanjangan Kontrak','Penambahan Karyawan'];
-  const vals = [28,18,8,22,52,20,36,8,15,16];
-  mkChart('cPengajuanKat','bar',{
-    labels:kat,
-    datasets:[{label:'Pengajuan',data:vals,backgroundColor:['#EF4444bb','#F59E0Bbb','#DC2626bb','#F59E0Bbb','#EF4444bb','#10B981bb','#3B82F6bb','#8B5CF6bb','#6366F1bb','#10B981bb'],borderRadius:4}]
-  },{indexAxis:'y',plugins:{legend:{display:false}}});
-
-  mkChart('cPengajuanTrend','line',{
-    labels:MONTHS,
-    datasets:[
-      {label:'PHK/Resign',data:MONTHS.map(()=>r(5,14)),borderColor:'#EF4444',backgroundColor:'transparent',tension:.4},
-      {label:'Mutasi',data:MONTHS.map(()=>r(3,10)),borderColor:'#3B82F6',backgroundColor:'transparent',tension:.4},
-      {label:'SP',data:MONTHS.map(()=>r(2,8)),borderColor:'#F59E0B',backgroundColor:'transparent',tension:.4},
-      {label:'Promosi',data:MONTHS.map(()=>r(1,6)),borderColor:'#10B981',backgroundColor:'transparent',tension:.4},
-    ]
-  },{});
-}
-
-function renderPengajuanTable(){
-  const kats=['SP 1','SP 2','SP 3','Surat Teguran','PHK / Resign','Promosi','Mutasi','Demosi'];
-  const jabatans=['Store Manager','Kitchen Crew','SPV Outlet','Leader','Cook Helper','Admin','Barista','Cashier'];
-  const names=['Budi S','Andi R','Citra D','Hendra W','Deni K','Fathur R','Gita S','Eka P'];
-  const pens=['Gading Serpong','Tanjung Duren','Cengkareng','Darmo','Penjaringan','Greenlake'];
-  document.getElementById('tblPengajuan').innerHTML = Array.from({length:18},()=>{
-    const co=pick(CO); const s=pick(['Done','Done','Done','Cancel','Pending']);
-    return `<tr>
-      <td>${coTag(co)}</td><td>${pick(kats)}</td><td>${pick(names)}</td>
-      <td>${pick(jabatans)}</td><td>${pick(pens)}</td><td>${rDate()}</td>
-      <td>${pick(['Silvi','Firza','Reza'])}</td><td>${statusTag(s)}</td>
-    </tr>`;
-  }).join('');
-}
-
-/* ════════════════════════════════════════════════
-   PAGE: PROMOSI / MUTASI / DEMOSI
-════════════════════════════════════════════════ */
-function renderPromMut(){
-  mkChart('cPromMutPT','bar',{
-    labels:MONTHS,
-    datasets:[
-      {label:'Promosi',data:MONTHS.map(()=>r(1,5)),backgroundColor:'#10B981bb',borderRadius:3},
-      {label:'Mutasi',data:MONTHS.map(()=>r(3,9)),backgroundColor:'#3B82F6bb',borderRadius:3},
-      {label:'Demosi',data:MONTHS.map(()=>r(0,2)),backgroundColor:'#EF4444bb',borderRadius:3},
-    ]
-  },{plugins:{legend:{position:'bottom'}}});
-
-  mkChart('cPromStatus','doughnut',{
-    labels:['Done','On Progress','Tidak Approve','Cancel'],
-    datasets:[{data:[58,12,8,6],backgroundColor:['#10B981','#6366F1','#EF4444','#9CA3AF'],borderWidth:0,hoverOffset:6}]
-  },{});
-
-  const names=['Utoyo','Hardian S','Reza P','Mira K','Dendi A','Fajar R','Sari W','Tono B'];
-  const jabatans=['SPV Outlet','Leader Outlet','Cook Helper','Cashier','Barista','Admin','Kitchen Crew','Store Manager'];
-  const locs=['Mini Calore Tanjung Duren','Pepero Pizza GS','Seoul BS Penjaringan','Minicalore Darmo','Obihiro GS'];
-  document.getElementById('tblPromMut').innerHTML = Array.from({length:15},()=>{
-    const co=pick(CO);const jenis=pick(['Promosi','Mutasi','Mutasi','Demosi']);
-    const s=pick(['Done','Done','On Progress','Cancel']);
-    return `<tr>
-      <td>${coTag(co)}</td><td>${pick(names)}</td>
-      <td>${pick(jabatans)}</td><td>${pick(locs)}</td>
-      <td>${statusTag(jenis)}</td><td>${pick(jabatans)}</td><td>${pick(locs)}</td>
-      <td>${rDate()}</td><td>Agil</td><td>${statusTag(s)}</td>
-    </tr>`;
-  }).join('');
-}
-
-/* ════════════════════════════════════════════════
-   PAGE: INTERVIEW
-════════════════════════════════════════════════ */
-function renderInterview(){
-  const positions=['Head Chef','Staff Admin','Kitchen Crew','SPV Outlet','Driver','Barista','Cook Helper','HRD Staff'];
-  const hrds=['Silvi','Firza','Reza'];
-  const statuses=[{l:'Confirm',c:'tag-done'},{l:'Belum Respon',c:'tag-prog'},{l:'Reschedule',c:'tag-hold'},{l:'Cancel',c:'tag-open'}];
-  const ivs = Array.from({length:8},(_,i)=>{
-    const d = new Date(2026,2,11+i); const s=pick(statuses);
-    return {d:d.getDate(),m:d.toLocaleString('id-ID',{month:'short'}),pos:pick(positions),hrd:pick(hrds),type:pick(['Offline','Online']),co:pick(CO),s};
-  });
-  document.getElementById('ivList').innerHTML = ivs.map(iv=>`
-    <div class="iv-item">
-      <div class="iv-date"><div class="d">${iv.d}</div><div class="m">${iv.m}</div></div>
-      <div class="iv-info">
-        <div class="iv-pos">${iv.pos}</div>
-        <div class="iv-meta">${coTag(iv.co)} &nbsp;${iv.hrd} · ${iv.type}</div>
-      </div>
-      <span class="tag ${iv.s.c} iv-badge">${iv.s.l}</span>
-    </div>
-  `).join('');
-
-  mkChart('cIntReport','bar',{
-    labels:['Agu 25','Sep 25','Okt 25','Nov 25','Des 25','Jan 26','Feb 26'],
-    datasets:[
-      {label:'Diundang',data:[18,22,16,24,20,19,15],backgroundColor:'#6366F166',borderRadius:3},
-      {label:'Konfirmasi',data:[14,18,13,20,17,15,12],backgroundColor:'#3B82F6bb',borderRadius:3},
-      {label:'Hadir',data:[10,14,10,16,13,12,9],backgroundColor:'#10B981',borderRadius:3}
-    ]
-  },{plugins:{legend:{position:'bottom'}}});
-
-  mkChart('cIntPos','bar',{
-    labels:['Kitchen Crew','Driver','Barista','Admin','SPV','Cook Helper','Cashier','HRD'],
-    datasets:[{label:'Interview',data:[42,28,22,18,15,12,10,8],backgroundColor:'#6366F1bb',borderRadius:4}]
-  },{indexAxis:'y',plugins:{legend:{display:false}}});
-
-  mkChart('cIntShow','bar',{
-    labels:CO,
-    datasets:[{label:'Show Rate %',data:CO.map(()=>r(60,90)),backgroundColor:CO.map(c=>CO_C[c]+'bb'),borderRadius:5}]
-  },{plugins:{legend:{display:false}},scales:{y:{max:100}}});
-}
-
-/* ════════════════════════════════════════════════
-   PAGE: TURNOVER
-════════════════════════════════════════════════ */
-function renderTurnover(){
-  mkChart('cTOTrend','line',{
-    labels:MONTHS,
-    datasets:CO.map(c=>({label:c,data:MONTHS.map(()=>+(r(40,130)/10).toFixed(1)),borderColor:CO_C[c],backgroundColor:'transparent',tension:.4,pointRadius:3}))
-  },{});
-
-  mkChart('cJoinOut','bar',{
-    labels:MONTHS,
-    datasets:[
-      {label:'Join',data:MONTHS.map(()=>r(20,40)),backgroundColor:'#10B981bb',borderRadius:3},
-      {label:'Out',data:MONTHS.map(()=>r(10,25)),backgroundColor:'#EF4444bb',borderRadius:3}
-    ]
-  },{plugins:{legend:{position:'bottom'}}});
-
-  const tbody = document.getElementById('tblTurnover');
-  const rows = [];
-  MONTHS.forEach(m=>{
-    CO.forEach(co=>{
-      const join=r(2,12),out=r(1,8),start=r(20,100),end=start+join-out;
-      const avg=((start+end)/2).toFixed(1);
-      const rate=((out/avg)*100).toFixed(2);
-      const cls=+rate>8?'badge-r':+rate>5?'badge-y':'badge-g';
-      rows.push(`<tr>
-        <td>${m}</td><td>${coTag(co)}</td>
-        <td>${start}</td><td>${join}</td><td>${out}</td><td>${end}</td><td>${avg}</td>
-        <td><span class="kpi-badge ${cls}">${rate}%</span></td>
-        <td><div class="prog-bar" style="width:80px"><div class="prog-fill" style="width:${Math.min(+rate*8,100)}%;background:${+rate>8?'#EF4444':+rate>5?'#F59E0B':'#10B981'}"></div></div></td>
-      </tr>`);
-    });
-  });
-  tbody.innerHTML = rows.join('');
-}
-
-/* ════════════════════════════════════════════════
-   PAGE: ABSENSI OVERVIEW
-════════════════════════════════════════════════ */
-function renderAbsOverview(){
-  mkChart('cAbsPT','bar',{
-    labels:CO,
-    datasets:[{label:'% Kehadiran',data:CO.map(()=>r(86,97)),backgroundColor:CO.map(c=>CO_C[c]+'cc'),borderRadius:6}]
-  },{plugins:{legend:{display:false}},scales:{y:{min:70,max:100}}});
-
-  mkChart('cAbsBreakdown','doughnut',{
-    labels:['Hadir','Terlambat','Sakit','Izin','Mangkir','Cuti'],
-    datasets:[{data:[3200,438,186,212,54,97],backgroundColor:['#10B981','#EF4444','#3B82F6','#F59E0B','#8B5CF6','#6366F1'],borderWidth:0,hoverOffset:6}]
-  },{});
-
-  mkChart('cAbsTrend','line',{
-    labels:MONTHS,
-    datasets:CO.map(c=>({label:c,data:MONTHS.map(()=>+(r(86,96)+Math.random()).toFixed(1)),borderColor:CO_C[c],backgroundColor:'transparent',tension:.4,pointRadius:3}))
-  },{scales:{y:{min:80,max:100}}});
-}
-
-/* ════════════════════════════════════════════════
-   PAGE: ABSEN MANUAL
-════════════════════════════════════════════════ */
-function renderAbsManual(){
-  mkChart('cManualAlasan','doughnut',{
-    labels:['Alat Error/Rusak','Lupa','Tidak Terdaftar','Jaringan','Lainnya'],
-    datasets:[{data:[128,82,44,20,10],backgroundColor:['#6366F1','#F59E0B','#3B82F6','#10B981','#9CA3AF'],borderWidth:0,hoverOffset:6}]
-  },{});
-
-  mkChart('cManualPT','bar',{
-    labels:MONTHS,
-    datasets:CO.map(c=>({label:c,data:MONTHS.map(()=>r(5,22)),backgroundColor:CO_C[c]+'bb',borderRadius:3}))
-  },{plugins:{legend:{position:'bottom'}}});
-
-  const names=['Andi S','Budi R','Citra P','Deni W','Eka F','Fathur H','Gita M','Hendra D'];
-  const jabatans=['Kitchen Crew','Barista','Cashier','Cook Helper','Admin','SPV Outlet'];
-  const alasans=['Alat Error','Lupa','Jaringan','Tidak Terdaftar','Lainnya'];
-  document.getElementById('tblManual').innerHTML = Array.from({length:15},()=>{
-    const co=pick(CO);
-    return `<tr>
-      <td>${coTag(co)}</td><td>${pick(names)}</td><td>${pick(jabatans)}</td><td>${rDate()}</td>
-      <td>0${r(7,9)}:${r(10,59).toString().padStart(2,'0')}</td>
-      <td>1${r(6,9)}:${r(10,59).toString().padStart(2,'0')}</td>
-      <td>${pick(alasans)}</td>
-      <td>${statusTag(pick(['Done','Done','Pending']))}</td>
-    </tr>`;
-  }).join('');
-}
-
-/* ════════════════════════════════════════════════
-   PAGE: LUPA ABSEN
-════════════════════════════════════════════════ */
-function renderAbsLupa(){
-  mkChart('cLupaType','doughnut',{
-    labels:['Lupa Absen Masuk','Lupa Absen Pulang','Lupa Keduanya'],
-    datasets:[{data:[143,218,67],backgroundColor:['#EF4444','#F59E0B','#8B5CF6'],borderWidth:0,hoverOffset:6}]
-  },{});
-
-  mkChart('cLupaPT','bar',{
-    labels:MONTHS,
-    datasets:CO.map(c=>({label:c,data:MONTHS.map(()=>r(8,28)),backgroundColor:CO_C[c]+'bb',borderRadius:3}))
-  },{plugins:{legend:{position:'bottom'}}});
-
-  const names=['Andi S','Budi R','Citra P','Deni W','Eka F','Fathur H'];
-  const jabatans=['Kitchen Crew','Barista','Cashier','Cook Helper','Admin','SPV'];
-  const types=['Lupa Masuk','Lupa Pulang','Lupa Keduanya'];
-  document.getElementById('tblLupa').innerHTML = Array.from({length:15},()=>{
-    const t=pick(types);const co=pick(CO);
-    const cls=t==='Lupa Keduanya'?'tag-open':t==='Lupa Masuk'?'tag-prog':'tag-hold';
-    return `<tr>
-      <td>${coTag(co)}</td><td>${pick(names)}</td><td>${pick(jabatans)}</td><td>${rDate()}</td>
-      <td><span class="tag ${cls}">${t}</span></td>
-      <td>Sudah dikonfirmasi atasan</td>
-      <td>${statusTag(pick(['Done','Done','Pending']))}</td>
-    </tr>`;
-  }).join('');
-}
-
-/* ════════════════════════════════════════════════
-   PAGE: STATUS KEHADIRAN
-════════════════════════════════════════════════ */
-function renderAbsStatus(){
-  mkChart('cStatPerPT','bar',{
-    labels:CO,
-    datasets:[
-      {label:'Terlambat',data:CO.map(()=>r(40,120)),backgroundColor:'#EF4444bb',borderRadius:3},
-      {label:'Sakit',data:CO.map(()=>r(20,60)),backgroundColor:'#3B82F6bb',borderRadius:3},
-      {label:'Mangkir',data:CO.map(()=>r(5,20)),backgroundColor:'#8B5CF6bb',borderRadius:3},
-      {label:'Izin',data:CO.map(()=>r(25,70)),backgroundColor:'#F59E0Bbb',borderRadius:3},
-      {label:'Cuti',data:CO.map(()=>r(10,30)),backgroundColor:'#10B981bb',borderRadius:3},
-    ]
-  },{plugins:{legend:{position:'bottom'}}});
-
-  mkChart('cStatTrend','line',{
-    labels:MONTHS,
-    datasets:[
-      {label:'Terlambat',data:MONTHS.map(()=>r(50,90)),borderColor:'#EF4444',backgroundColor:'transparent',tension:.4},
-      {label:'Sakit',data:MONTHS.map(()=>r(20,40)),borderColor:'#3B82F6',backgroundColor:'transparent',tension:.4},
-      {label:'Mangkir',data:MONTHS.map(()=>r(5,15)),borderColor:'#8B5CF6',backgroundColor:'transparent',tension:.4},
-      {label:'Izin',data:MONTHS.map(()=>r(25,50)),borderColor:'#F59E0B',backgroundColor:'transparent',tension:.4},
-    ]
-  },{});
-
-  const names=['Andi S','Budi R','Citra P','Deni W','Eka F','Fathur H','Gita M','Hendra D'];
-  const jabatans=['Kitchen Crew','Barista','Cashier','Cook Helper','Admin','SPV Outlet'];
-  const depts=['Operasional','HR','Finance','Kitchen','Service'];
-  const statuses=['Terlambat','Sakit','Mangkir','Izin','Cuti'];
-  document.getElementById('tblAbsStatus').innerHTML = Array.from({length:20},()=>{
-    const co=pick(CO);const s=pick(statuses);
-    const cls={Terlambat:'tag-open',Sakit:'tag-blue',Mangkir:'tag-open',Izin:'tag-prog',Cuti:'tag-done'}[s];
-    return `<tr>
-      <td>${coTag(co)}</td><td>${pick(names)}</td><td>${pick(depts)}</td><td>${pick(jabatans)}</td>
-      <td>${rDate()}</td><td><span class="tag ${cls}">${s}</span></td>
-      <td>${s==='Terlambat'?r(5,90)+' mnt':s==='Sakit'?r(1,3)+' hari':'—'}</td>
-    </tr>`;
-  }).join('');
-}
-
-/* ════════════════════════════════════════════════
-   PAGE: TOP 10
-════════════════════════════════════════════════ */
-let currentTop10 = 'terlambat';
-
-function switchTop10(type, el){
-  document.querySelectorAll('.s-tab').forEach(t=>t.classList.remove('active'));
-  el.classList.add('active');
-  renderTop10(type);
-}
-
-function renderTop10(type){
-  currentTop10 = type;
-  const titles={terlambat:'Terlambat',sakit:'Sakit',mangkir:'Mangkir / Alpha',izin:'Izin'};
-  const units={terlambat:'kali',sakit:'hari',mangkir:'kali',izin:'hari'};
-  const maxes={terlambat:25,sakit:15,mangkir:10,izin:20};
-  document.getElementById('top10Title').textContent = `Top 10 — Paling Banyak ${titles[type]} (Bulan Ini)`;
-  document.getElementById('top10TrendTitle').textContent = titles[type];
-
-  const names=['Andi S','Budi R','Citra P','Deni W','Eka F','Fathur H','Gita M','Hendra D','Indra K','Joko P'];
-  const data = names.map((n,i)=>({name:n,co:pick(CO),val:maxes[type]-r(0,Math.floor(maxes[type]*0.7))})).sort((a,b)=>b.val-a.val).slice(0,10);
-  const maxVal = data[0].val;
-
-  document.getElementById('top10List').innerHTML = data.map((d,i)=>`
-    <div class="rank-item">
-      <div class="rank-no ${i<3?'top3':''}">${i+1}</div>
-      <div class="rank-name">${d.name}<br><span class="rank-pt">${coTag(d.co)}</span></div>
-      <div style="flex:1;padding:0 12px"><div class="rank-bar-w" style="width:100%"><div class="rank-bar" style="width:${(d.val/maxVal)*100}%;background:${i<3?'#EF4444':'#6366F1'}"></div></div></div>
-      <div class="rank-val">${d.val} <span style="font-size:10px;font-weight:400;color:var(--text3)">${units[type]}</span></div>
-    </div>
-  `).join('');
-
-  mkChart('cTop10PT','doughnut',{
-    labels:CO,
-    datasets:[{data:CO.map(()=>r(5,30)),backgroundColor:Object.values(CO_C),borderWidth:0,hoverOffset:6}]
-  },{});
-
-  mkChart('cTop10Trend','line',{
-    labels:MONTHS,
-    datasets:[
-      {label:'Semua PT',data:MONTHS.map(()=>r(30,100)),borderColor:'#6366F1',backgroundColor:'rgba(99,102,241,.1)',tension:.4,fill:true},
-    ]
-  },{plugins:{legend:{display:false}}});
-}
-
 /* ════════════════════════════════════════════════════════════════
-   ██████╗ ██████╗ ███╗   ██╗███████╗██╗ ██████╗
-  ██╔════╝██╔═══██╗████╗  ██║██╔════╝██║██╔════╝
-  ██║     ██║   ██║██╔██╗ ██║█████╗  ██║██║  ███╗
-  ██║     ██║   ██║██║╚██╗██║██╔══╝  ██║██║   ██║
-  ╚██████╗╚██████╔╝██║ ╚████║██║     ██║╚██████╔╝
-   ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝     ╚═╝ ╚═════╝
-
-  CARA SETUP (baca dulu sebelum deploy):
-  ────────────────────────────────────────────────
-  1. Isi SPREADSHEET_ID di bawah dengan ID Google Sheets kamu
-     (bagian URL antara /d/ dan /edit)
-  2. Pastikan nama sheet di SHEET_NAMES sesuai dengan nama
-     tab di spreadsheet kamu (huruf kapital sensitif!)
-  3. Publish spreadsheet kamu:
-     File → Share → Publish to web → CSV → Publish
-  4. Simpan & push ke GitHub → data otomatis connect
-
-  Kalau mau tetap pakai demo data, biarkan SPREADSHEET_ID = ''
+   CONFIG — EDIT BAGIAN INI UNTUK CONNECT KE GOOGLE SHEETS
 ════════════════════════════════════════════════════════════════ */
-
 // ┌─────────────────────────────────────────────────────────────┐
 // │  ⚙️  EDIT BAGIAN INI SAJA                                    │
 // └─────────────────────────────────────────────────────────────┘
-const SPREADSHEET_ID = '151Fg_9eyMHRUAURz2SO5yzxZRz-sIuieUQW9pOBSJM0';   // ← paste ID spreadsheet kamu di sini
-//   contoh: '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms'
+var SPREADSHEET_ID = '151Fg_9eyMHRUAURz2SO5yzxZRz-sIuieUQW9pOBSJM0';
+// contoh: '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms'
 
-const SHEET_NAMES = {
-  request    : 'DS_Request',       // Permintaan karyawan
-  pelamar    : 'DS_Pelamar',       // Form pelamar
-  pengajuan  : 'DS_Pengajuan',     // SP/PHK/Resign/dll
-  prommut    : 'DS_PromMut',       // Promosi/Mutasi/Demosi
-  turnover   : 'DS_Turnover',      // Data IN/OUT per karyawan
-  toSummary  : 'Turnover_Summary', // Summary turnover per PT per bulan
-  interview  : 'DS_Interview',     // Jadwal interview
-  reportInt  : 'Report_Interview', // Report interview (diundang vs hadir)
-  spst       : 'SP_ST',            // Surat Peringatan
-  headcount  : 'Headcount_Monthly' // Headcount bulanan
+var SHEET_NAMES = {
+  request   : 'DS_Request',
+  pelamar   : 'DS_Pelamar',
+  pengajuan : 'DS_Pengajuan',
+  prommut   : 'DS_PromMut',
+  turnover  : 'DS_Turnover',
+  toSummary : 'Turnover_Summary',
+  interview : 'DS_Interview',
+  reportInt : 'Report_Interview',
+  spst      : 'SP_ST',
+  headcount : 'Headcount_Monthly'
 };
 // └─────────────────────────────────────────────────────────────┘
 
-/* ────────────────────────────────────────────────────────────
-   DATA LAYER — baca dari Google Sheets via CSV
-   Tidak perlu diubah. Otomatis fallback ke demo jika gagal.
-──────────────────────────────────────────────────────────── */
-
-// Global data store — diisi setelah fetch berhasil
-const DS = {
-  request: [], pelamar: [], pengajuan: [], prommut: [],
-  turnover: [], toSummary: [], interview: [], reportInt: [],
-  spst: [], headcount: []
+/* ════════ CONSTANTS ════════ */
+var CO    = ['VVV','VVA','VLA','VCI','VMN'];
+var CO_C  = {VVV:'#6366F1',VVA:'#3B82F6',VLA:'#10B981',VCI:'#8B5CF6',VMN:'#F59E0B'};
+var CHARTS = {};
+var DS    = { request:[], pelamar:[], pengajuan:[], prommut:[], turnover:[], toSummary:[], interview:[], reportInt:[], spst:[], headcount:[] };
+var BLN   = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
+var PAGE_TITLES = {
+  req:'Permintaan Karyawan', pelamar:'Form Pelamar', pengajuan:'Form Pengajuan',
+  prommut:'Promosi / Mutasi / Demosi', interview:'Jadwal Interview', turnover:'Turnover',
+  absoverview:'Overview Absensi', absmanual:'Absen Manual', abslupa:'Lupa Absen',
+  absstatus:'Status Kehadiran', abstop10:'Top 10 Karyawan'
 };
 
-// Bangun URL fetch ke Google Sheets (format CSV publik)
-function sheetURL(sheetKey) {
-  const name = SHEET_NAMES[sheetKey];
-  return `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}`;
+/* ════════ HELPERS ════════ */
+function rnd(a,b){return Math.floor(Math.random()*(b-a+1))+a}
+function pick(arr){return arr[rnd(0,arr.length-1)]}
+function coTag(pt){return '<span class="co-tag co-'+pt+'">'+pt+'</span>'}
+function statusTag(s){
+  var m={Done:'tag-done','On Progress':'tag-prog',Hold:'tag-hold',Cancel:'tag-hold',Pending:'tag-open',Gagal:'tag-open',Terpenuhi:'tag-done',Open:'tag-open',Promosi:'tag-done',Mutasi:'tag-blue',Demosi:'tag-open'};
+  return '<span class="tag '+(m[s]||'tag-hold')+'">'+s+'</span>';
+}
+function durTag(days){
+  var d=parseFloat(days)||0;
+  var cls=d<=14?'dur-ok':d<=30?'dur-warn':'dur-crit';
+  return '<span class="dur '+cls+'">'+Math.round(d)+' hr</span>';
+}
+function fmtD(raw){
+  if(!raw||raw==='')return '—';
+  var d=new Date(raw);
+  return isNaN(d.getTime())?raw:d.toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'});
+}
+function setKPI(id,val){
+  var el=document.getElementById(id);
+  if(el)el.textContent=(val===null||val===undefined)?'—':val;
 }
 
-// Parse CSV teks → array of objects (key = header row)
-function parseCSV(csvText) {
-  const lines = csvText.trim().split('\n');
-  if (lines.length < 2) return [];
-  // Papa Parse tidak tersedia di versi ini, parse manual
-  const parseRow = (line) => {
-    const result = []; let cur = ''; let inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') { inQ = !inQ; continue; }
-      if (ch === ',' && !inQ) { result.push(cur.trim()); cur = ''; continue; }
-      cur += ch;
-    }
-    result.push(cur.trim());
-    return result;
-  };
-  const headers = parseRow(lines[0]).map(h => h.replace(/^"|"$/g,''));
-  return lines.slice(1).map(line => {
-    const vals = parseRow(line);
-    const obj = {};
-    headers.forEach((h, i) => { obj[h] = (vals[i] || '').replace(/^"|"$/g,''); });
-    return obj;
-  }).filter(row => Object.values(row).some(v => v !== ''));
+/* ════════ NAVIGATION ════════ */
+function showPage(name, el){
+  document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active')});
+  document.querySelectorAll('.nav-item').forEach(function(n){n.classList.remove('active')});
+  var pg=document.getElementById('page-'+name);
+  if(pg)pg.classList.add('active');
+  if(el)el.classList.add('active');
+  var title=document.getElementById('pageTitle');
+  if(title)title.textContent=PAGE_TITLES[name]||name;
 }
 
-// Fetch satu sheet → return array of objects
-async function fetchSheet(sheetKey) {
-  const url = sheetURL(sheetKey);
-  const res = await fetch(url, { cache: 'no-cache' });
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${sheetKey}`);
-  const text = await res.text();
-  return parseCSV(text);
-}
-
-// ── STATUS UI ──────────────────────────────────────────────────
-function setLoadStatus(msg, type = 'info') {
-  let bar = document.getElementById('loadStatusBar');
-  if (!bar) {
-    bar = document.createElement('div');
-    bar.id = 'loadStatusBar';
-    bar.style.cssText = `
-      position:fixed;bottom:16px;right:16px;z-index:9999;
-      padding:10px 16px;border-radius:8px;font-size:12px;font-weight:500;
-      display:flex;align-items:center;gap:8px;
-      box-shadow:0 4px 12px rgba(0,0,0,.2);transition:opacity .3s;
-      font-family:'Inter',sans-serif;max-width:340px;
-    `;
-    document.body.appendChild(bar);
-  }
-  const colors = {
-    info:    { bg:'#1A1D2B', border:'#2A2E42', text:'#a5b4fc' },
-    success: { bg:'#052e16', border:'#16a34a', text:'#4ade80' },
-    error:   { bg:'#2d1515', border:'#dc2626', text:'#fca5a5' },
-    loading: { bg:'#1A1D2B', border:'#6366F1', text:'#a5b4fc' },
-  };
-  const c = colors[type] || colors.info;
-  bar.style.background  = c.bg;
-  bar.style.border      = `1px solid ${c.border}`;
-  bar.style.color       = c.text;
-  bar.style.opacity     = '1';
-  bar.innerHTML         = msg;
-  if (type === 'success') {
-    setTimeout(() => { bar.style.opacity = '0'; }, 3000);
-  }
-}
-
-// ── MAIN LOADER ────────────────────────────────────────────────
-async function loadFromSheets() {
-  if (!SPREADSHEET_ID) {
-    // Tidak ada ID → langsung demo
-    setLoadStatus('ℹ️ Mode Demo — isi SPREADSHEET_ID untuk data live', 'info');
-    setTimeout(() => {
-      const bar = document.getElementById('loadStatusBar');
-      if (bar) bar.style.opacity = '0';
-    }, 4000);
-    renderAll(); // pakai data random (demo)
-    return;
-  }
-
-  setLoadStatus('<span style="display:inline-block;animation:spin .8s linear infinite">⟳</span> &nbsp;Memuat data dari Google Sheets…', 'loading');
-
-  const keys = Object.keys(SHEET_NAMES);
-  const results = await Promise.allSettled(keys.map(k => fetchSheet(k)));
-
-  let failCount = 0;
-  results.forEach((res, i) => {
-    const key = keys[i];
-    if (res.status === 'fulfilled' && res.value.length > 0) {
-      DS[key] = res.value;
-    } else {
-      failCount++;
-      console.warn(`Sheet "${SHEET_NAMES[key]}" gagal dimuat:`, res.reason || 'empty');
+/* ════════ THEME ════════ */
+function toggleTheme(){
+  var html=document.documentElement;
+  var isDark=html.getAttribute('data-theme')==='dark';
+  html.setAttribute('data-theme',isDark?'light':'dark');
+  var lbl=document.getElementById('themeLabel');
+  if(lbl)lbl.textContent=isDark?'☀ Light':'🌙 Dark';
+  Object.values(CHARTS).forEach(function(c){
+    if(c&&c.options){
+      var tc=isDark?'#5A6380':'#8B91AC';
+      if(c.options.plugins&&c.options.plugins.legend)
+        c.options.plugins.legend.labels.color=tc;
+      c.update();
     }
   });
+}
 
-  if (failCount === keys.length) {
-    setLoadStatus(`❌ Semua sheet gagal dimuat. Pastikan spreadsheet sudah di-publish & ID benar.
-      <br><small>Cek console (F12) untuk detail error.</small>`, 'error');
-    renderAll(); // fallback demo
-    return;
+/* ════════ FILTER PT ════════ */
+function filterPT(pt,el){
+  document.querySelectorAll('.pt-chip').forEach(function(c){c.classList.remove('active')});
+  if(el)el.classList.add('active');
+  renderAll();
+}
+
+function getActivePT(){
+  var el=document.querySelector('.pt-chip.active');
+  return el?el.dataset.pt:'ALL';
+}
+function getDateRange(){
+  var from=document.getElementById('fDateFrom');
+  var to=document.getElementById('fDateTo');
+  return {from:from?from.value:'2025-08', to:to?to.value:'2026-02'};
+}
+
+/* ════════ MONTH LABELS ════════ */
+function buildMonthLabels(){
+  var range=getDateRange();
+  var from=range.from||'2025-08', to=range.to||'2026-02';
+  var labels=[];
+  var parts=from.split('-'); var y=parseInt(parts[0]),m=parseInt(parts[1]);
+  var eParts=to.split('-');   var ey=parseInt(eParts[0]),em=parseInt(eParts[1]);
+  while(y<ey||(y===ey&&m<=em)){
+    labels.push(BLN[m-1]+' '+String(y).slice(2));
+    m++; if(m>12){m=1;y++;}
+    if(labels.length>24)break; // safety
   }
-
-  if (failCount > 0) {
-    setLoadStatus(`⚠️ ${failCount} sheet gagal dimuat, sisanya berhasil.`, 'error');
-  } else {
-    setLoadStatus(`✅ Data berhasil dimuat (${keys.length} sheets, ${new Date().toLocaleTimeString('id-ID')})`, 'success');
-  }
-
-  renderAllFromSheets(); // render dengan data asli
+  return labels;
 }
 
-/* ─────────────────────────────────────────────────────────────
-   RENDER DARI DATA NYATA (DS.*)
-   Setiap fungsi di bawah mem-parse DS.* dan merender chart/tabel
-   menggunakan kolom yang PERSIS sama dengan struktur spreadsheet
-───────────────────────────────────────────────────────────── */
-
-// Ambil nilai filter aktif
-function getActivePT() {
-  const el = document.querySelector('.pt-chip.active');
-  return el ? el.dataset.pt : 'ALL';
-}
-function getDateRange() {
-  const from = document.getElementById('fDateFrom').value; // "2025-08"
-  const to   = document.getElementById('fDateTo').value;   // "2026-02"
-  return { from, to };
+function monthLabel(dateVal){
+  if(!dateVal)return null;
+  var d=new Date(dateVal);
+  if(isNaN(d.getTime()))return null;
+  return BLN[d.getMonth()]+' '+String(d.getFullYear()).slice(2);
 }
 
-// Filter array berdasarkan kolom tanggal (format bisa vary) dan PT
-function filterRows(rows, ptCol, dateCol) {
-  const pt   = getActivePT();
-  const { from, to } = getDateRange();
-  return rows.filter(row => {
-    if (pt !== 'ALL' && row[ptCol] !== pt) return false;
-    if (dateCol && row[dateCol]) {
-      // coba parse tanggal — Sheets export bisa "8/1/2025" atau "2025-08-01"
-      const raw = row[dateCol];
-      const d = new Date(raw);
-      if (!isNaN(d)) {
-        const ym = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-        if (from && ym < from) return false;
-        if (to   && ym > to)   return false;
+function groupByMonth(rows,dateCol){
+  var map={};
+  rows.forEach(function(row){
+    var lbl=monthLabel(row[dateCol]);
+    if(!lbl)return;
+    if(!map[lbl])map[lbl]=[];
+    map[lbl].push(row);
+  });
+  return map;
+}
+
+function filterRows(rows,ptCol,dateCol){
+  var pt=getActivePT();
+  var range=getDateRange();
+  return rows.filter(function(row){
+    if(pt!=='ALL'&&row[ptCol]!==pt)return false;
+    if(dateCol&&row[dateCol]){
+      var d=new Date(row[dateCol]);
+      if(!isNaN(d.getTime())){
+        var ym=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+        if(range.from&&ym<range.from)return false;
+        if(range.to&&ym>range.to)return false;
       }
     }
     return true;
   });
 }
 
-// Format tanggal dari string Sheets → string ID
-function fmtD(raw) {
-  if (!raw) return '—';
-  const d = new Date(raw);
-  return isNaN(d) ? raw : d.toLocaleDateString('id-ID', {day:'2-digit',month:'short',year:'numeric'});
-}
-
-// Kelompokkan per bulan: returns { 'Agu 25': [...], ... }
-function groupByMonth(rows, dateCol) {
-  const BLN = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
-  const map = {};
-  rows.forEach(row => {
-    const raw = row[dateCol];
-    if (!raw) return;
-    const d = new Date(raw);
-    if (isNaN(d)) return;
-    const label = BLN[d.getMonth()] + ' ' + String(d.getFullYear()).slice(2);
-    if (!map[label]) map[label] = [];
-    map[label].push(row);
-  });
-  return map;
-}
-
-// Buat label bulan dari rentang filter
-function buildMonthLabels() {
-  const { from, to } = getDateRange();
-  const BLN = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
-  const labels = [];
-  let [y, m] = (from || '2025-08').split('-').map(Number);
-  const [ey, em] = (to   || '2026-02').split('-').map(Number);
-  while (y < ey || (y === ey && m <= em)) {
-    labels.push(BLN[m-1] + ' ' + String(y).slice(2));
-    m++; if (m > 12) { m = 1; y++; }
-  }
-  return labels;
-}
-
-// Set angka ke elemen KPI
-function setKPI(id, val) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = val ?? '—';
-}
-
-/* ══════════════════════════════════════════════════
-   RENDER: PERMINTAAN KARYAWAN (DS_Request)
-   Kolom: Timestamp, Perusahaan yang mengajukan,
-          Posisi yang dibutuhkan, Status Permintaan,
-          Level/Golongan Karyawan, Proses Rekrutmen,
-          Tanggal Join, Karyawan yang Join, Durasi,
-          Nama yang mengajukan
-══════════════════════════════════════════════════ */
-function renderReqFromSheets() {
-  const rows   = filterRows(DS.request, 'Perusahaan yang mengajukan', 'Timestamp');
-  const joined = rows.filter(r => r['Tanggal Join'] && r['Tanggal Join'] !== '');
-  const open   = rows.filter(r => !r['Tanggal Join'] || r['Tanggal Join'] === '');
-  const avgDur = rows.length
-    ? Math.round(rows.reduce((s,r) => s + (parseFloat(r['Durasi'])||0), 0) / rows.length)
-    : 0;
-
-  setKPI('kpiReqTotal', rows.length);
-  setKPI('kpiReqDone',  joined.length);
-  setKPI('kpiReqOpen',  open.length);
-  setKPI('kpiReqAvgDur', avgDur + ' hr');
-
-  const mLabels = buildMonthLabels();
-  const byMonth = groupByMonth(rows, 'Timestamp');
-  const joinByMonth = groupByMonth(joined, 'Tanggal Join');
-
-  // Chart: Permintaan vs Terpenuhi per bulan
-  mkChart('cReqFulfill','bar',{
-    labels: mLabels,
-    datasets:[
-      {label:'Diminta',   data: mLabels.map(m => (byMonth[m]||[]).length), backgroundColor:'rgba(99,102,241,.5)',borderRadius:4},
-      {label:'Terpenuhi', data: mLabels.map(m => (joinByMonth[m]||[]).length), backgroundColor:'rgba(16,185,129,.6)',borderRadius:4}
-    ]
-  },{plugins:{legend:{position:'bottom'}}});
-
-  // Chart: per PT
-  const pts = ['VVV','VVA','VLA','VCI','VMN'].filter(p => rows.some(r => r['Perusahaan yang mengajukan']===p));
-  mkChart('cReqPT','bar',{
-    labels: pts,
-    datasets:[
-      {label:'Diminta',   data: pts.map(p => rows.filter(r=>r['Perusahaan yang mengajukan']===p).length), backgroundColor: pts.map(p=>CO_C[p]+'88'),borderRadius:4},
-      {label:'Terpenuhi', data: pts.map(p => joined.filter(r=>r['Perusahaan yang mengajukan']===p).length), backgroundColor: pts.map(p=>CO_C[p]),borderRadius:4}
-    ]
-  },{plugins:{legend:{position:'bottom'}}});
-
-  // Chart: Join per PT per bulan
-  mkChart('cJoinMonth','bar',{
-    labels: mLabels,
-    datasets: pts.map(p => ({
-      label: p,
-      data: mLabels.map(m => (joinByMonth[m]||[]).filter(r=>r['Perusahaan yang mengajukan']===p).length),
-      backgroundColor: CO_C[p]+'bb', borderRadius:3
-    }))
-  },{plugins:{legend:{position:'bottom'}}});
-
-  // Chart: Out per bulan (dari DS_Turnover status=OUT)
-  const outRows    = filterRows(DS.turnover, 'Perusahaan', 'Bulan');
-  const outByMonth = groupByMonth(outRows.filter(r=>r['Status']==='OUT'||r['Status']==='Out'), 'Bulan');
-  mkChart('cOutMonth','bar',{
-    labels: mLabels,
-    datasets: pts.map(p => ({
-      label: p,
-      data: mLabels.map(m => (outByMonth[m]||[]).filter(r=>r['Perusahaan']===p).length),
-      backgroundColor: CO_C[p]+'88', borderRadius:3
-    }))
-  },{plugins:{legend:{position:'bottom'}}});
-
-  // Pipeline counts
-  const pipe = {
-    'Screening CV': rows.filter(r=>r['Proses Rekrutmen']==='Screening CV').length,
-    'Interview':    rows.filter(r=>r['Proses Rekrutmen']==='Interview').length,
-    'Offering':     rows.filter(r=>r['Proses Rekrutmen']==='Offering').length,
-    'On Progress':  rows.filter(r=>r['Proses Rekrutmen']==='On Progress').length,
-    'Hold':         rows.filter(r=>r['Proses Rekrutmen']==='Hold').length,
-    'Done':         joined.length,
+/* ════════ CHART HELPER ════════ */
+function mkChart(id,type,data,opts){
+  opts=opts||{};
+  if(CHARTS[id])CHARTS[id].destroy();
+  var ctx=document.getElementById(id);
+  if(!ctx)return;
+  var isDark=document.documentElement.getAttribute('data-theme')==='dark';
+  var gc=isDark?'rgba(255,255,255,.05)':'rgba(0,0,0,.05)';
+  var tc=isDark?'#8B91AC':'#5A6380';
+  var defaults={
+    responsive:true,
+    plugins:{legend:{labels:{color:tc,font:{size:11},padding:10},position:'bottom'},
+             tooltip:{backgroundColor:isDark?'#1A1D2B':'#fff',titleColor:isDark?'#E8EAF0':'#1A1D2E',bodyColor:tc,padding:10,cornerRadius:8,borderColor:isDark?'#2A2E42':'#E4E7EF',borderWidth:1}},
+    scales:{x:{grid:{color:gc},ticks:{color:tc,font:{size:11}}},y:{grid:{color:gc},ticks:{color:tc,font:{size:11}}}}
   };
-  const pipeEl = document.querySelector('.pipeline');
-  if (pipeEl) {
-    pipeEl.innerHTML = Object.entries(pipe).map(([label,n],i) =>
-      `<div class="pipe-step ${n>0?'s-done':''} ${label==='On Progress'?'s-curr':''}">
-        <div class="pn">${n}</div><div class="pl">${label}</div>
-      </div>`
-    ).join('');
+  if(type==='doughnut'||type==='pie')delete defaults.scales;
+  if(opts.indexAxis==='y'){
+    defaults.scales={x:{grid:{color:gc},ticks:{color:tc,font:{size:11}}},y:{grid:{color:gc},ticks:{color:tc,font:{size:11}}}};
   }
-
-  // Tabel: Open requests
-  document.getElementById('tblOpenReq').innerHTML = open.map(row => {
-    const dur = parseFloat(row['Durasi'])||0;
-    const co  = row['Perusahaan yang mengajukan'] || '—';
-    return `<tr>
-      <td>${coTag(co)}</td>
-      <td>${row['Posisi yang dibutuhkan']||'—'}</td>
-      <td>${row['Level / Golongan Karyawan']||'—'}</td>
-      <td><span class="tag tag-blue">${row['Status Permintaan']||'—'}</span></td>
-      <td>${fmtD(row['Timestamp'])}</td>
-      <td>${durTag(dur)}</td>
-      <td>${statusTag(row['Proses Rekrutmen']||'—')}</td>
-      <td>${row['Nama yang mengajukan']||'—'}</td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text3)">Tidak ada open request</td></tr>';
+  // deep merge
+  function dm(t,s){for(var k in s){if(s[k]&&typeof s[k]==='object'&&!Array.isArray(s[k])){if(!t[k])t[k]={};dm(t[k],s[k]);}else t[k]=s[k];}return t;}
+  CHARTS[id]=new Chart(ctx,{type:type,data:data,options:dm(defaults,opts)});
 }
 
-/* ══════════════════════════════════════════════════
-   RENDER: FORM PELAMAR (DS_Pelamar)
-   Kolom: Timestamp, Nama Lengkap, Posisi yang dilamar,
-          Brand yang dilamar, Status, Tanggal Interview HR,
-          Tanggal Interview User, Tanggal Join, Remark,
-          Dari mana anda mengetahui...
-══════════════════════════════════════════════════ */
-function renderPelamarFromSheets() {
-  const rows = DS.pelamar.filter(r => {
-    const { from, to } = getDateRange();
-    const d = new Date(r['Timestamp']);
-    if (isNaN(d)) return true;
-    const ym = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-    return (!from || ym >= from) && (!to || ym <= to);
+/* ════════ TABLE HELPERS ════════ */
+function filterTbl(input,tbodyId){
+  var q=input.value.toLowerCase();
+  document.querySelectorAll('#'+tbodyId+' tr').forEach(function(tr){
+    tr.style.display=tr.textContent.toLowerCase().includes(q)?'':'none';
   });
-
-  const statusCounts = {};
-  rows.forEach(r => {
-    const s = r['Status'] || 'Belum diproses';
-    statusCounts[s] = (statusCounts[s]||0) + 1;
+}
+function filterTblSelect(sel,tbodyId,colIdx){
+  var v=sel.value.toLowerCase();
+  document.querySelectorAll('#'+tbodyId+' tr').forEach(function(tr){
+    var td=tr.querySelectorAll('td')[colIdx];
+    tr.style.display=(!v||!td||td.textContent.toLowerCase()===v)?'':'none';
   });
-
-  const joined  = rows.filter(r => r['Tanggal Join'] && r['Tanggal Join'] !== '').length;
-  const gagal   = rows.filter(r => r['Status'] === 'Gagal').length;
-  const pending = rows.filter(r => !r['Status'] || r['Status'] === '').length;
-
-  setKPI('kpiPelTotal',  rows.length);
-  setKPI('kpiPelPending', pending);
-  setKPI('kpiPelJoin',   joined);
-  setKPI('kpiPelGagal',  gagal);
-
-  // Chart: pipeline status
-  const stages = ['Interview HR','Interview User','Tes Skill','Offering Letter','Kontrak','Gagal'];
-  mkChart('cPelamarStatus','bar',{
-    labels: [...stages, 'Join'],
-    datasets:[{
-      label:'Pelamar',
-      data: [...stages.map(s=>statusCounts[s]||0), joined],
-      backgroundColor:['#6366F1bb','#3B82F6bb','#8B5CF6bb','#F59E0Bbb','#10B981bb','#EF4444bb','#10B981'],
-      borderRadius:4
-    }]
-  },{plugins:{legend:{display:false}}});
-
-  // Chart: sumber pelamar
-  const srcCol = 'Dari mana anda mengetahui informasi posisi yang anda lamar?';
-  const srcMap = {};
-  rows.forEach(r => {
-    let src = r[srcCol] || 'Lainnya';
-    // normalisasi
-    if (/referens|referal/i.test(src)) src = 'Referral';
-    else if (/linkedin/i.test(src)) src = 'LinkedIn';
-    else if (/jobstreet/i.test(src)) src = 'JobStreet';
-    else if (/instagram|ig/i.test(src)) src = 'Instagram';
-    else if (/walk.?in/i.test(src)) src = 'Walk-in';
-    else if (/olx/i.test(src)) src = 'OLX';
-    else src = 'Lainnya';
-    srcMap[src] = (srcMap[src]||0)+1;
-  });
-  const srcEntries = Object.entries(srcMap).sort((a,b)=>b[1]-a[1]);
-  mkChart('cPelamarChannel','doughnut',{
-    labels: srcEntries.map(e=>e[0]),
-    datasets:[{data: srcEntries.map(e=>e[1]),
-      backgroundColor:['#6366F1','#3B82F6','#8B5CF6','#F59E0B','#10B981','#EF4444','#9CA3AF'],
-      borderWidth:0,hoverOffset:6}]
-  },{});
-
-  // Tabel
-  document.getElementById('tblPelamar').innerHTML = rows.slice(0,100).map(row => `<tr>
-    <td>${row['Nama Lengkap']||'—'}</td>
-    <td>${row['Posisi yang dilamar']||'—'}</td>
-    <td>${row['Brand yang dilamar']||'—'}</td>
-    <td>${fmtD(row['Timestamp'])}</td>
-    <td>${fmtD(row['Tanggal Interview HR'])}</td>
-    <td>${fmtD(row['Tanggal Interview User'])}</td>
-    <td>${fmtD(row['Tanggal Join'])}</td>
-    <td>${statusTag(row['Status']||'Belum diproses')}</td>
-  </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text3)">Tidak ada data</td></tr>';
 }
 
-/* ══════════════════════════════════════════════════
-   RENDER: FORM PENGAJUAN (DS_Pengajuan)
-   Kolom: Timestamp, Kategori Pengajuan, PT,
-          Nama yang mengajukan, Nama Karyawan yang bersangkutan,
-          Jabatan Saat Ini, Penempatan Saat Ini, Status
-══════════════════════════════════════════════════ */
-function renderPengajuanFromSheets() {
-  const rows = DS.pengajuan.filter(r => {
-    const pt = getActivePT();
-    if (pt !== 'ALL' && r['PT'] !== pt) return false;
-    const { from, to } = getDateRange();
-    const d = new Date(r['Timestamp']);
-    if (!isNaN(d)) {
-      const ym = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-      if (from && ym < from) return false;
-      if (to   && ym > to)   return false;
-    }
+/* ════════ RANDOM DEMO DATA ════════ */
+function rDate(){
+  var months=['Agu 2025','Sep 2025','Okt 2025','Nov 2025','Des 2025','Jan 2026','Feb 2026'];
+  var m=pick(months); var d=rnd(1,28);
+  return d+' '+m.slice(0,3)+' '+m.slice(4);
+}
+
+/* ════════════════════════════════════════════════════════
+   DEMO RENDERERS (dipakai saat SPREADSHEET_ID kosong)
+════════════════════════════════════════════════════════ */
+function renderReq(){
+  var MONTHS=buildMonthLabels();
+  setKPI('kpiReqTotal','156'); setKPI('kpiReqDone','118');
+  setKPI('kpiReqOpen','38');   setKPI('kpiReqAvgDur','18 hr');
+  mkChart('cReqFulfill','bar',{labels:MONTHS,datasets:[
+    {label:'Diminta',data:MONTHS.map(function(){return rnd(10,28)}),backgroundColor:'rgba(99,102,241,.5)',borderRadius:4},
+    {label:'Terpenuhi',data:MONTHS.map(function(){return rnd(6,20)}),backgroundColor:'rgba(16,185,129,.6)',borderRadius:4}
+  ]},{plugins:{legend:{position:'bottom'}}});
+  mkChart('cReqPT','bar',{labels:CO,datasets:[
+    {label:'Diminta',data:CO.map(function(){return rnd(20,60)}),backgroundColor:CO.map(function(c){return CO_C[c]+'88'}),borderRadius:4},
+    {label:'Terpenuhi',data:CO.map(function(){return rnd(10,45)}),backgroundColor:CO.map(function(c){return CO_C[c]}),borderRadius:4}
+  ]},{plugins:{legend:{position:'bottom'}}});
+  mkChart('cJoinMonth','bar',{labels:MONTHS,datasets:CO.map(function(c){return{label:c,data:MONTHS.map(function(){return rnd(2,12)}),backgroundColor:CO_C[c]+'bb',borderRadius:3}})},{plugins:{legend:{position:'bottom'}}});
+  mkChart('cOutMonth','bar',{labels:MONTHS,datasets:CO.map(function(c){return{label:c,data:MONTHS.map(function(){return rnd(1,8)}),backgroundColor:CO_C[c]+'88',borderRadius:3}})},{plugins:{legend:{position:'bottom'}}});
+  var pos=['Pizza Cook','Driver','Kitchen Crew','SPV Outlet','Barista','Cook Helper','Cashier','Admin HR'];
+  var levels=['Staff / Crew','Leader','Supervisor','Manager'];
+  var proses=['Screening CV','Interview','On Progress','Hold','Offering'];
+  var rows='';
+  for(var i=0;i<12;i++){
+    var days=rnd(5,65); var co=pick(CO);
+    rows+='<tr><td>'+coTag(co)+'</td><td>'+pick(pos)+'</td><td>'+pick(levels)+'</td><td><span class="tag tag-blue">'+pick(['Additional','Replacement'])+'</span></td><td>'+rDate()+'</td><td>'+durTag(days)+'</td><td>'+statusTag(pick(proses))+'</td><td>'+pick(['Silvi','Firza','Reza'])+'</td></tr>';
+  }
+  document.getElementById('tblOpenReq').innerHTML=rows;
+}
+
+function renderPelamar(){
+  setKPI('kpiPelTotal','342'); setKPI('kpiPelPending','47');
+  setKPI('kpiPelJoin','118');  setKPI('kpiPelGagal','156');
+  mkChart('cPelamarStatus','bar',{labels:['Masuk','Interview HR','Interview User','Tes Skill','Offering','Kontrak/Join','Gagal'],datasets:[{label:'Pelamar',data:[342,295,180,140,130,118,156],backgroundColor:['#6366F1bb','#3B82F6bb','#8B5CF6bb','#F59E0Bbb','#10B981bb','#10B981','#EF4444bb'],borderRadius:4}]},{plugins:{legend:{display:false}}});
+  mkChart('cPelamarChannel','doughnut',{labels:['Referral','LinkedIn','JobStreet','Instagram','Walk-in','OLX','Lainnya'],datasets:[{data:[72,88,56,48,34,22,22],backgroundColor:['#6366F1','#3B82F6','#8B5CF6','#F59E0B','#10B981','#EF4444','#9CA3AF'],borderWidth:0,hoverOffset:6}]},{});
+  var names=['Andi P','Budi S','Citra D','Deni K','Eka R','Fathur R','Gita S','Hendra W'];
+  var pos=['Kitchen Crew','Barista','Driver','SPV Outlet','Admin HR'];
+  var brands=['Mini Calore','Pepero Pizza','Seoul Bakeshop'];
+  var statuses=['Gagal','Interview HR','Interview User','Offering Letter','Kontrak','Tes Skill'];
+  var rows='';
+  for(var i=0;i<15;i++){
+    var s=pick(statuses);
+    rows+='<tr><td>'+pick(names)+'</td><td>'+pick(pos)+'</td><td>'+pick(brands)+'</td><td>'+rDate()+'</td><td>'+rDate()+'</td><td>'+(Math.random()>.4?rDate():'—')+'</td><td>'+(Math.random()>.6?rDate():'—')+'</td><td>'+statusTag(s)+'</td></tr>';
+  }
+  document.getElementById('tblPelamar').innerHTML=rows;
+}
+
+function renderPengajuanCharts(){
+  var MONTHS=buildMonthLabels();
+  var kat=['SP 1','SP 2','SP 3','Surat Teguran','PHK / Resign','Promosi','Mutasi','Demosi','Perpanjangan Kontrak','Penambahan'];
+  var vals=[28,18,8,22,52,20,36,8,15,16];
+  mkChart('cPengajuanKat','bar',{labels:kat,datasets:[{label:'Pengajuan',data:vals,backgroundColor:'#6366F1bb',borderRadius:4}]},{indexAxis:'y',plugins:{legend:{display:false}}});
+  mkChart('cPengajuanTrend','line',{labels:MONTHS,datasets:[
+    {label:'PHK/Resign',data:MONTHS.map(function(){return rnd(5,14)}),borderColor:'#EF4444',backgroundColor:'transparent',tension:.4},
+    {label:'Mutasi',data:MONTHS.map(function(){return rnd(3,10)}),borderColor:'#3B82F6',backgroundColor:'transparent',tension:.4},
+    {label:'SP',data:MONTHS.map(function(){return rnd(2,8)}),borderColor:'#F59E0B',backgroundColor:'transparent',tension:.4},
+    {label:'Promosi',data:MONTHS.map(function(){return rnd(1,6)}),borderColor:'#10B981',backgroundColor:'transparent',tension:.4}
+  ]},{});
+  setKPI('kpiPengTotal','203'); setKPI('kpiPengDone','168'); setKPI('kpiPengPending','35');
+}
+
+function renderPengajuanTable(){
+  var kats=['SP 1','SP 2','SP 3','Surat Teguran','PHK / Resign','Promosi','Mutasi','Demosi'];
+  var jabs=['Store Manager','Kitchen Crew','SPV Outlet','Leader','Cook Helper','Admin','Barista'];
+  var names=['Budi S','Andi R','Citra D','Hendra W','Deni K','Fathur R'];
+  var pens=['Gading Serpong','Tanjung Duren','Cengkareng','Darmo','Penjaringan'];
+  var rows='';
+  for(var i=0;i<18;i++){
+    var co=pick(CO); var s=pick(['Done','Done','Done','Cancel','Pending']);
+    rows+='<tr><td>'+coTag(co)+'</td><td>'+pick(kats)+'</td><td>'+pick(names)+'</td><td>'+pick(jabs)+'</td><td>'+pick(pens)+'</td><td>'+rDate()+'</td><td>'+pick(['Silvi','Firza','Reza'])+'</td><td>'+statusTag(s)+'</td></tr>';
+  }
+  document.getElementById('tblPengajuan').innerHTML=rows;
+}
+
+function renderPromMut(){
+  var MONTHS=buildMonthLabels();
+  setKPI('kpiPMTotal','84'); setKPI('kpiPMProm','28'); setKPI('kpiPMMut','48');
+  setKPI('kpiPMDem','8');   setKPI('kpiPMProg','12');
+  mkChart('cPromMutPT','bar',{labels:MONTHS,datasets:[
+    {label:'Promosi',data:MONTHS.map(function(){return rnd(1,5)}),backgroundColor:'#10B981bb',borderRadius:3},
+    {label:'Mutasi', data:MONTHS.map(function(){return rnd(3,9)}),backgroundColor:'#3B82F6bb',borderRadius:3},
+    {label:'Demosi', data:MONTHS.map(function(){return rnd(0,2)}),backgroundColor:'#EF4444bb',borderRadius:3}
+  ]},{plugins:{legend:{position:'bottom'}}});
+  mkChart('cPromStatus','doughnut',{labels:['Done','On Progress','Tidak Approve','Cancel'],datasets:[{data:[58,12,8,6],backgroundColor:['#10B981','#6366F1','#EF4444','#9CA3AF'],borderWidth:0,hoverOffset:6}]},{});
+  var names=['Utoyo','Hardian S','Reza P','Mira K','Dendi A'];
+  var jabs=['SPV Outlet','Leader Outlet','Cook Helper','Cashier','Barista','Admin'];
+  var locs=['Mini Calore Tanjung Duren','Pepero Pizza GS','Seoul BS Penjaringan'];
+  var rows='';
+  for(var i=0;i<15;i++){
+    var co=pick(CO); var jenis=pick(['Promosi','Mutasi','Mutasi','Demosi']); var s=pick(['Done','Done','On Progress','Cancel']);
+    rows+='<tr><td>'+coTag(co)+'</td><td>'+pick(names)+'</td><td>'+pick(jabs)+'</td><td>'+pick(locs)+'</td><td>'+statusTag(jenis)+'</td><td>'+pick(jabs)+'</td><td>'+pick(locs)+'</td><td>'+rDate()+'</td><td>Agil</td><td>'+statusTag(s)+'</td></tr>';
+  }
+  document.getElementById('tblPromMut').innerHTML=rows;
+}
+
+function renderInterview(){
+  var MONTHS=buildMonthLabels();
+  setKPI('kpiIvUpcoming','14'); setKPI('kpiIvConfirm','9');
+  setKPI('kpiIvNoResp','5');   setKPI('kpiIvReschedule','3'); setKPI('kpiIvShowRate','78%');
+  var positions=['Head Chef','Staff Admin','Kitchen Crew','SPV Outlet','Driver','Barista'];
+  var hrds=['Silvi','Firza','Reza'];
+  var statuses=[{l:'Confirm',c:'tag-done'},{l:'Belum Respon',c:'tag-prog'},{l:'Reschedule',c:'tag-hold'},{l:'Cancel',c:'tag-open'}];
+  var ivs='';
+  for(var i=0;i<7;i++){
+    var d=new Date(2026,2,11+i); var s=pick(statuses); var co=pick(CO);
+    ivs+='<div class="iv-item"><div class="iv-date"><div class="d">'+d.getDate()+'</div><div class="m">'+BLN[d.getMonth()]+'</div></div><div class="iv-info"><div class="iv-pos">'+pick(positions)+'</div><div class="iv-meta">'+coTag(co)+'&nbsp;'+pick(hrds)+' · Offline</div></div><span class="tag '+s.c+' iv-badge">'+s.l+'</span></div>';
+  }
+  document.getElementById('ivList').innerHTML=ivs;
+  mkChart('cIntReport','bar',{labels:MONTHS,datasets:[
+    {label:'Diundang',  data:MONTHS.map(function(){return rnd(10,25)}),backgroundColor:'#6366F166',borderRadius:3},
+    {label:'Konfirmasi',data:MONTHS.map(function(){return rnd(8,20)}), backgroundColor:'#3B82F6bb',borderRadius:3},
+    {label:'Hadir',     data:MONTHS.map(function(){return rnd(5,15)}), backgroundColor:'#10B981',  borderRadius:3}
+  ]},{plugins:{legend:{position:'bottom'}}});
+  mkChart('cIntPos','bar',{labels:['Kitchen Crew','Driver','Barista','Admin','SPV','Cook Helper','Cashier','HRD'],datasets:[{label:'Interview',data:[42,28,22,18,15,12,10,8],backgroundColor:'#6366F1bb',borderRadius:4}]},{indexAxis:'y',plugins:{legend:{display:false}}});
+  mkChart('cIntShow','bar',{labels:CO,datasets:[{label:'Show Rate %',data:CO.map(function(){return rnd(60,90)}),backgroundColor:CO.map(function(c){return CO_C[c]+'bb'}),borderRadius:5}]},{plugins:{legend:{display:false}},scales:{y:{max:100}}});
+}
+
+function renderTurnover(){
+  var MONTHS=buildMonthLabels();
+  setKPI('kpiTOAvg','9.2%'); setKPI('kpiTOOut','147');
+  setKPI('kpiTOJoin','193'); setKPI('kpiTOHigh','VVA'); setKPI('kpiTOLow','VVV');
+  mkChart('cTOTrend','line',{labels:MONTHS,datasets:CO.map(function(c){return{label:c,data:MONTHS.map(function(){return+(rnd(40,130)/10).toFixed(1)}),borderColor:CO_C[c],backgroundColor:'transparent',tension:.4,pointRadius:3}})},{});
+  mkChart('cJoinOut','bar',{labels:MONTHS,datasets:[
+    {label:'Join',data:MONTHS.map(function(){return rnd(20,40)}),backgroundColor:'#10B981bb',borderRadius:3},
+    {label:'Out', data:MONTHS.map(function(){return rnd(10,25)}),backgroundColor:'#EF4444bb',borderRadius:3}
+  ]},{plugins:{legend:{position:'bottom'}}});
+  var rows='';
+  MONTHS.forEach(function(m){
+    CO.forEach(function(co){
+      var join=rnd(2,12),out=rnd(1,8),start=rnd(20,100),end=start+join-out;
+      var avg=((start+end)/2).toFixed(1); var rate=(out/avg*100).toFixed(2);
+      var cls=+rate>8?'badge-r':+rate>5?'badge-y':'badge-g';
+      rows+='<tr><td>'+m+'</td><td>'+coTag(co)+'</td><td>'+start+'</td><td>'+join+'</td><td>'+out+'</td><td>'+end+'</td><td>'+avg+'</td><td><span class="kpi-badge '+cls+'">'+rate+'%</span></td><td><div class="prog-bar" style="width:80px"><div class="prog-fill" style="width:'+Math.min(+rate*8,100)+'%;background:'+(+rate>8?'#EF4444':+rate>5?'#F59E0B':'#10B981')+'"></div></div></td></tr>';
+    });
+  });
+  document.getElementById('tblTurnover').innerHTML=rows;
+}
+
+function renderAbsOverview(){
+  mkChart('cAbsPT','bar',{labels:CO,datasets:[{label:'% Kehadiran',data:CO.map(function(){return rnd(86,97)}),backgroundColor:CO.map(function(c){return CO_C[c]+'cc'}),borderRadius:6}]},{plugins:{legend:{display:false}},scales:{y:{min:70,max:100}}});
+  mkChart('cAbsBreakdown','doughnut',{labels:['Hadir','Terlambat','Sakit','Izin','Mangkir','Cuti'],datasets:[{data:[3200,438,186,212,54,97],backgroundColor:['#10B981','#EF4444','#3B82F6','#F59E0B','#8B5CF6','#6366F1'],borderWidth:0,hoverOffset:6}]},{});
+  var MONTHS=buildMonthLabels();
+  mkChart('cAbsTrend','line',{labels:MONTHS,datasets:CO.map(function(c){return{label:c,data:MONTHS.map(function(){return+(rnd(86,96)+Math.random()).toFixed(1)}),borderColor:CO_C[c],backgroundColor:'transparent',tension:.4,pointRadius:3}})},{scales:{y:{min:80,max:100}}});
+}
+
+function renderAbsManual(){
+  mkChart('cManualAlasan','doughnut',{labels:['Alat Error/Rusak','Lupa','Tidak Terdaftar','Jaringan','Lainnya'],datasets:[{data:[128,82,44,20,10],backgroundColor:['#6366F1','#F59E0B','#3B82F6','#10B981','#9CA3AF'],borderWidth:0,hoverOffset:6}]},{});
+  var MONTHS=buildMonthLabels();
+  mkChart('cManualPT','bar',{labels:MONTHS,datasets:CO.map(function(c){return{label:c,data:MONTHS.map(function(){return rnd(5,22)}),backgroundColor:CO_C[c]+'bb',borderRadius:3}})},{plugins:{legend:{position:'bottom'}}});
+  var names=['Andi S','Budi R','Citra P','Deni W','Eka F','Fathur H'];
+  var jabs=['Kitchen Crew','Barista','Cashier','Cook Helper','Admin','SPV Outlet'];
+  var alasans=['Alat Error','Lupa','Jaringan','Tidak Terdaftar','Lainnya'];
+  var rows='';
+  for(var i=0;i<15;i++){
+    var co=pick(CO);
+    rows+='<tr><td>'+coTag(co)+'</td><td>'+pick(names)+'</td><td>'+pick(jabs)+'</td><td>'+rDate()+'</td><td>0'+rnd(7,9)+':'+String(rnd(10,59)).padStart(2,'0')+'</td><td>1'+rnd(6,9)+':'+String(rnd(10,59)).padStart(2,'0')+'</td><td>'+pick(alasans)+'</td><td>'+statusTag(pick(['Done','Done','Pending']))+'</td></tr>';
+  }
+  document.getElementById('tblManual').innerHTML=rows;
+}
+
+function renderAbsLupa(){
+  mkChart('cLupaType','doughnut',{labels:['Lupa Absen Masuk','Lupa Absen Pulang','Lupa Keduanya'],datasets:[{data:[143,218,67],backgroundColor:['#EF4444','#F59E0B','#8B5CF6'],borderWidth:0,hoverOffset:6}]},{});
+  var MONTHS=buildMonthLabels();
+  mkChart('cLupaPT','bar',{labels:MONTHS,datasets:CO.map(function(c){return{label:c,data:MONTHS.map(function(){return rnd(8,28)}),backgroundColor:CO_C[c]+'bb',borderRadius:3}})},{plugins:{legend:{position:'bottom'}}});
+  var names=['Andi S','Budi R','Citra P','Deni W','Eka F','Fathur H'];
+  var jabs=['Kitchen Crew','Barista','Cashier','Cook Helper','Admin','SPV'];
+  var types=['Lupa Masuk','Lupa Pulang','Lupa Keduanya'];
+  var rows='';
+  for(var i=0;i<15;i++){
+    var t=pick(types); var co=pick(CO);
+    var cls=t==='Lupa Keduanya'?'tag-open':t==='Lupa Masuk'?'tag-prog':'tag-hold';
+    rows+='<tr><td>'+coTag(co)+'</td><td>'+pick(names)+'</td><td>'+pick(jabs)+'</td><td>'+rDate()+'</td><td><span class="tag '+cls+'">'+t+'</span></td><td>Sudah dikonfirmasi atasan</td><td>'+statusTag(pick(['Done','Done','Pending']))+'</td></tr>';
+  }
+  document.getElementById('tblLupa').innerHTML=rows;
+}
+
+function renderAbsStatus(){
+  mkChart('cStatPerPT','bar',{labels:CO,datasets:[
+    {label:'Terlambat',data:CO.map(function(){return rnd(40,120)}),backgroundColor:'#EF4444bb',borderRadius:3},
+    {label:'Sakit',    data:CO.map(function(){return rnd(20,60)}), backgroundColor:'#3B82F6bb',borderRadius:3},
+    {label:'Mangkir',  data:CO.map(function(){return rnd(5,20)}),  backgroundColor:'#8B5CF6bb',borderRadius:3},
+    {label:'Izin',     data:CO.map(function(){return rnd(25,70)}), backgroundColor:'#F59E0Bbb',borderRadius:3},
+    {label:'Cuti',     data:CO.map(function(){return rnd(10,30)}), backgroundColor:'#10B981bb',borderRadius:3}
+  ]},{plugins:{legend:{position:'bottom'}}});
+  var MONTHS=buildMonthLabels();
+  mkChart('cStatTrend','line',{labels:MONTHS,datasets:[
+    {label:'Terlambat',data:MONTHS.map(function(){return rnd(50,90)}),borderColor:'#EF4444',backgroundColor:'transparent',tension:.4},
+    {label:'Sakit',    data:MONTHS.map(function(){return rnd(20,40)}),borderColor:'#3B82F6',backgroundColor:'transparent',tension:.4},
+    {label:'Mangkir',  data:MONTHS.map(function(){return rnd(5,15)}), borderColor:'#8B5CF6',backgroundColor:'transparent',tension:.4},
+    {label:'Izin',     data:MONTHS.map(function(){return rnd(25,50)}),borderColor:'#F59E0B',backgroundColor:'transparent',tension:.4}
+  ]},{});
+  var names=['Andi S','Budi R','Citra P','Deni W','Eka F','Fathur H','Gita M','Hendra D'];
+  var jabs=['Kitchen Crew','Barista','Cashier','Cook Helper','Admin','SPV Outlet'];
+  var depts=['Operasional','HR','Finance','Kitchen','Service'];
+  var statuses=['Terlambat','Sakit','Mangkir','Izin','Cuti'];
+  var rows='';
+  for(var i=0;i<20;i++){
+    var co=pick(CO); var s=pick(statuses);
+    var cls={Terlambat:'tag-open',Sakit:'tag-blue',Mangkir:'tag-open',Izin:'tag-prog',Cuti:'tag-done'}[s];
+    rows+='<tr><td>'+coTag(co)+'</td><td>'+pick(names)+'</td><td>'+pick(depts)+'</td><td>'+pick(jabs)+'</td><td>'+rDate()+'</td><td><span class="tag '+cls+'">'+s+'</span></td><td>'+(s==='Terlambat'?rnd(5,90)+' mnt':s==='Sakit'?rnd(1,3)+' hari':'—')+'</td></tr>';
+  }
+  document.getElementById('tblAbsStatus').innerHTML=rows;
+}
+
+function renderTop10(type){
+  var titles={terlambat:'Terlambat',sakit:'Sakit',mangkir:'Mangkir / Alpha',izin:'Izin'};
+  var units={terlambat:'kali',sakit:'hari',mangkir:'kali',izin:'hari'};
+  var maxes={terlambat:25,sakit:15,mangkir:10,izin:20};
+  var t1=document.getElementById('top10Title'); if(t1)t1.textContent='Top 10 — Paling Banyak '+titles[type]+' (Bulan Ini)';
+  var t2=document.getElementById('top10TrendTitle'); if(t2)t2.textContent=titles[type];
+  var names=['Andi S','Budi R','Citra P','Deni W','Eka F','Fathur H','Gita M','Hendra D','Indra K','Joko P'];
+  var data=names.map(function(n){return{name:n,co:pick(CO),val:maxes[type]-rnd(0,Math.floor(maxes[type]*.7))};}).sort(function(a,b){return b.val-a.val}).slice(0,10);
+  var maxVal=data[0].val;
+  var html='';
+  data.forEach(function(d,i){
+    html+='<div class="rank-item"><div class="rank-no '+(i<3?'top3':'')+'">'+( i+1)+'</div><div class="rank-name">'+d.name+'<br><span class="rank-pt">'+coTag(d.co)+'</span></div><div style="flex:1;padding:0 12px"><div class="rank-bar-w" style="width:100%"><div class="rank-bar" style="width:'+(d.val/maxVal*100)+'%;background:'+(i<3?'#EF4444':'#6366F1')+'"></div></div></div><div class="rank-val">'+d.val+' <span style="font-size:10px;font-weight:400;color:var(--text3)">'+units[type]+'</span></div></div>';
+  });
+  document.getElementById('top10List').innerHTML=html;
+  mkChart('cTop10PT','doughnut',{labels:CO,datasets:[{data:CO.map(function(){return rnd(5,30)}),backgroundColor:Object.values(CO_C),borderWidth:0,hoverOffset:6}]},{});
+  var MONTHS=buildMonthLabels();
+  mkChart('cTop10Trend','line',{labels:MONTHS,datasets:[{label:'Semua PT',data:MONTHS.map(function(){return rnd(30,100)}),borderColor:'#6366F1',backgroundColor:'rgba(99,102,241,.1)',tension:.4,fill:true}]},{plugins:{legend:{display:false}}});
+}
+
+function switchTop10(type,el){
+  document.querySelectorAll('.s-tab').forEach(function(t){t.classList.remove('active')});
+  if(el)el.classList.add('active');
+  renderTop10(type);
+}
+
+/* ════════════════════════════════════════════════════════
+   REAL DATA RENDERERS (dipakai saat DS.* terisi dari Sheets)
+════════════════════════════════════════════════════════ */
+function normalizeKat(kat){
+  if(!kat)return 'Lainnya';
+  if(/SP.*3|SP3/i.test(kat))return 'SP 3';
+  if(/SP.*2|SP2/i.test(kat))return 'SP 2';
+  if(/SP.*1|SP1/i.test(kat))return 'SP 1';
+  if(/teguran/i.test(kat))return 'Surat Teguran';
+  if(/resign|PHK|pemutusan/i.test(kat))return 'PHK / Resign';
+  if(/promosi/i.test(kat))return 'Promosi';
+  if(/mutasi/i.test(kat))return 'Mutasi';
+  if(/demosi/i.test(kat))return 'Demosi';
+  if(/kontrak/i.test(kat))return 'Perpanjangan Kontrak';
+  if(/penambahan/i.test(kat))return 'Penambahan Karyawan';
+  if(/pengangkatan/i.test(kat))return 'Pengangkatan';
+  return kat.length>28?kat.slice(0,28)+'…':kat;
+}
+
+function renderReqReal(){
+  var rows=filterRows(DS.request,'Perusahaan yang mengajukan','Timestamp');
+  var joined=rows.filter(function(r){return r['Tanggal Join']&&r['Tanggal Join']!==''});
+  var open=rows.filter(function(r){return !r['Tanggal Join']||r['Tanggal Join']===''});
+  var avgDur=rows.length?Math.round(rows.reduce(function(s,r){return s+(parseFloat(r['Durasi'])||0)},0)/rows.length):0;
+  setKPI('kpiReqTotal',rows.length); setKPI('kpiReqDone',joined.length);
+  setKPI('kpiReqOpen',open.length);  setKPI('kpiReqAvgDur',avgDur+' hr');
+  var ML=buildMonthLabels();
+  var byM=groupByMonth(rows,'Timestamp');
+  var joinByM=groupByMonth(joined,'Tanggal Join');
+  mkChart('cReqFulfill','bar',{labels:ML,datasets:[
+    {label:'Diminta',  data:ML.map(function(m){return (byM[m]||[]).length}),backgroundColor:'rgba(99,102,241,.5)',borderRadius:4},
+    {label:'Terpenuhi',data:ML.map(function(m){return (joinByM[m]||[]).length}),backgroundColor:'rgba(16,185,129,.6)',borderRadius:4}
+  ]},{plugins:{legend:{position:'bottom'}}});
+  var pts=CO.filter(function(p){return rows.some(function(r){return r['Perusahaan yang mengajukan']===p})});
+  if(!pts.length)pts=CO;
+  mkChart('cReqPT','bar',{labels:pts,datasets:[
+    {label:'Diminta',  data:pts.map(function(p){return rows.filter(function(r){return r['Perusahaan yang mengajukan']===p}).length}),backgroundColor:pts.map(function(p){return CO_C[p]+'88'}),borderRadius:4},
+    {label:'Terpenuhi',data:pts.map(function(p){return joined.filter(function(r){return r['Perusahaan yang mengajukan']===p}).length}),backgroundColor:pts.map(function(p){return CO_C[p]}),borderRadius:4}
+  ]},{plugins:{legend:{position:'bottom'}}});
+  mkChart('cJoinMonth','bar',{labels:ML,datasets:pts.map(function(p){return{label:p,data:ML.map(function(m){return (joinByM[m]||[]).filter(function(r){return r['Perusahaan yang mengajukan']===p}).length}),backgroundColor:CO_C[p]+'bb',borderRadius:3}})},{plugins:{legend:{position:'bottom'}}});
+  var outRows=DS.turnover.filter(function(r){return /out/i.test(r['Status']||'')});
+  var outByM=groupByMonth(outRows,'Bulan');
+  mkChart('cOutMonth','bar',{labels:ML,datasets:pts.map(function(p){return{label:p,data:ML.map(function(m){return (outByM[m]||[]).filter(function(r){return r['Perusahaan']===p}).length}),backgroundColor:CO_C[p]+'88',borderRadius:3}})},{plugins:{legend:{position:'bottom'}}});
+  document.getElementById('tblOpenReq').innerHTML=open.slice(0,50).map(function(row){
+    var co=row['Perusahaan yang mengajukan']||'—';
+    return '<tr><td>'+coTag(co)+'</td><td>'+(row['Posisi yang dibutuhkan']||'—')+'</td><td>'+(row['Level / Golongan Karyawan']||'—')+'</td><td><span class="tag tag-blue">'+(row['Status Permintaan']||'—')+'</span></td><td>'+fmtD(row['Timestamp'])+'</td><td>'+durTag(row['Durasi']||0)+'</td><td>'+statusTag(row['Proses Rekrutmen']||'—')+'</td><td>'+(row['Nama yang mengajukan']||'—')+'</td></tr>';
+  }).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--text3)">Tidak ada open request</td></tr>';
+}
+
+function renderPelamarReal(){
+  var rows=DS.pelamar.filter(function(r){
+    var range=getDateRange(); var d=new Date(r['Timestamp']);
+    if(!isNaN(d.getTime())){var ym=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');if(range.from&&ym<range.from)return false;if(range.to&&ym>range.to)return false;}
     return true;
   });
-
-  // Normalisasi kategori
-  const normalizeKat = (kat) => {
-    if (!kat) return 'Lainnya';
-    if (/SP.*3|SP3/i.test(kat))     return 'SP 3';
-    if (/SP.*2|SP2/i.test(kat))     return 'SP 2';
-    if (/SP.*1|SP1/i.test(kat))     return 'SP 1';
-    if (/teguran/i.test(kat))       return 'Surat Teguran';
-    if (/resign|PHK|pemutusan/i.test(kat)) return 'PHK / Resign';
-    if (/promosi/i.test(kat))       return 'Promosi';
-    if (/mutasi/i.test(kat))        return 'Mutasi';
-    if (/demosi/i.test(kat))        return 'Demosi';
-    if (/kontrak/i.test(kat))       return 'Perpanjangan Kontrak';
-    if (/penambahan/i.test(kat))    return 'Penambahan Karyawan';
-    if (/pengangkatan/i.test(kat))  return 'Pengangkatan';
-    return kat.length > 25 ? kat.slice(0,25)+'…' : kat;
-  };
-
-  const katCounts = {};
-  rows.forEach(r => {
-    const k = normalizeKat(r['Kategori Pengajuan']);
-    katCounts[k] = (katCounts[k]||0)+1;
-  });
-
-  const done    = rows.filter(r => r['Status']==='Done').length;
-  const pending = rows.filter(r => !r['Status']||r['Status']==='').length;
-  const topKat  = Object.entries(katCounts).sort((a,b)=>b[1]-a[1])[0];
-  const ptCounts = {}; rows.forEach(r=>{const p=r['PT']||'?';ptCounts[p]=(ptCounts[p]||0)+1});
-  const topPT   = Object.entries(ptCounts).sort((a,b)=>b[1]-a[1])[0];
-
-  setKPI('kpiPengTotal',   rows.length);
-  setKPI('kpiPengDone',    done);
-  setKPI('kpiPengPending', pending);
-
-  // Chart: per kategori
-  const katEntries = Object.entries(katCounts).sort((a,b)=>b[1]-a[1]);
-  mkChart('cPengajuanKat','bar',{
-    labels: katEntries.map(e=>e[0]),
-    datasets:[{label:'Pengajuan',data:katEntries.map(e=>e[1]),
-      backgroundColor:'#6366F1bb',borderRadius:4}]
-  },{indexAxis:'y',plugins:{legend:{display:false}}});
-
-  // Chart: tren per bulan
-  const mLabels = buildMonthLabels();
-  const byMonth = groupByMonth(rows, 'Timestamp');
-  const katTrend = ['PHK / Resign','Mutasi','SP 1','SP 2','Promosi'];
-  mkChart('cPengajuanTrend','line',{
-    labels: mLabels,
-    datasets: katTrend.map((k,i) => ({
-      label: k,
-      data: mLabels.map(m => (byMonth[m]||[]).filter(r=>normalizeKat(r['Kategori Pengajuan'])===k).length),
-      borderColor:['#EF4444','#3B82F6','#F59E0B','#8B5CF6','#10B981'][i],
-      backgroundColor:'transparent',tension:.4
-    }))
-  },{});
-
-  // Tabel
-  document.getElementById('tblPengajuan').innerHTML = rows.slice(0,100).map(row => `<tr>
-    <td>${coTag(row['PT']||'—')}</td>
-    <td>${normalizeKat(row['Kategori Pengajuan'])}</td>
-    <td>${(row['Nama Karyawan yang bersangkutan\n']||row['Nama Karyawan yang bersangkutan']||'—').trim()}</td>
-    <td>${row['Jabatan Saat Ini']||'—'}</td>
-    <td>${row['Penempatan Saat Ini']||'—'}</td>
-    <td>${fmtD(row['Timestamp'])}</td>
-    <td>${row['Nama yang mengajukan']||'—'}</td>
-    <td>${statusTag(row['Status']||'Pending')}</td>
-  </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text3)">Tidak ada data</td></tr>';
+  var joined=rows.filter(function(r){return r['Tanggal Join']&&r['Tanggal Join']!==''}).length;
+  var gagal=rows.filter(function(r){return r['Status']==='Gagal'}).length;
+  var pending=rows.filter(function(r){return !r['Status']||r['Status']===''}).length;
+  setKPI('kpiPelTotal',rows.length); setKPI('kpiPelPending',pending);
+  setKPI('kpiPelJoin',joined); setKPI('kpiPelGagal',gagal);
+  var stCt={}; rows.forEach(function(r){var s=r['Status']||'Belum diproses';stCt[s]=(stCt[s]||0)+1;});
+  var stages=['Interview HR','Interview User','Tes Skill','Offering Letter','Kontrak','Gagal'];
+  mkChart('cPelamarStatus','bar',{labels:stages.concat(['Join']),datasets:[{label:'Pelamar',data:stages.map(function(s){return stCt[s]||0}).concat([joined]),backgroundColor:['#6366F1bb','#3B82F6bb','#8B5CF6bb','#F59E0Bbb','#10B981bb','#EF4444bb','#10B981'],borderRadius:4}]},{plugins:{legend:{display:false}}});
+  var srcCol='Dari mana anda mengetahui informasi posisi yang anda lamar?';
+  var srcMap={}; rows.forEach(function(r){var src=r[srcCol]||'Lainnya';if(/referens|referal/i.test(src))src='Referral';else if(/linkedin/i.test(src))src='LinkedIn';else if(/jobstreet/i.test(src))src='JobStreet';else if(/instagram|ig/i.test(src))src='Instagram';else if(/walk.?in/i.test(src))src='Walk-in';else if(/olx/i.test(src))src='OLX';else src='Lainnya';srcMap[src]=(srcMap[src]||0)+1;});
+  var srcE=Object.entries(srcMap).sort(function(a,b){return b[1]-a[1]});
+  mkChart('cPelamarChannel','doughnut',{labels:srcE.map(function(e){return e[0]}),datasets:[{data:srcE.map(function(e){return e[1]}),backgroundColor:['#6366F1','#3B82F6','#8B5CF6','#F59E0B','#10B981','#EF4444','#9CA3AF'],borderWidth:0,hoverOffset:6}]},{});
+  document.getElementById('tblPelamar').innerHTML=rows.slice(0,100).map(function(row){
+    return '<tr><td>'+(row['Nama Lengkap']||'—')+'</td><td>'+(row['Posisi yang dilamar']||'—')+'</td><td>'+(row['Brand yang dilamar']||'—')+'</td><td>'+fmtD(row['Timestamp'])+'</td><td>'+fmtD(row['Tanggal Interview HR'])+'</td><td>'+fmtD(row['Tanggal Interview User'])+'</td><td>'+fmtD(row['Tanggal Join'])+'</td><td>'+statusTag(row['Status']||'Belum diproses')+'</td></tr>';
+  }).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--text3)">Tidak ada data</td></tr>';
 }
 
-/* ══════════════════════════════════════════════════
-   RENDER: PROMOSI / MUTASI / DEMOSI (DS_PromMut)
-   Kolom: Date, PT, Nama Karyawan, User, Jenis Pengajuan,
-          Jabatan Lama, Lokasi Lama, PT Baru, Jabatan Baru,
-          Lokasi Baru, Tanggal Efektif Perubahan, Status
-══════════════════════════════════════════════════ */
-function renderPromMutFromSheets() {
-  const rows  = filterRows(DS.prommut, 'PT', ' Date');
-  const prom  = rows.filter(r=>r['Jenis Pengajuan']==='Promosi');
-  const mut   = rows.filter(r=>r['Jenis Pengajuan']==='Mutasi');
-  const dem   = rows.filter(r=>r['Jenis Pengajuan']==='Demosi');
-  const prog  = rows.filter(r=>r['Status']==='On Progress');
-
-  setKPI('kpiPMTotal', rows.length);
-  setKPI('kpiPMProm',  prom.length);
-  setKPI('kpiPMMut',   mut.length);
-  setKPI('kpiPMDem',   dem.length);
-  setKPI('kpiPMProg',  prog.length);
-
-  const mLabels = buildMonthLabels();
-  const byMonth = groupByMonth(rows, ' Date');
-  mkChart('cPromMutPT','bar',{
-    labels: mLabels,
-    datasets:[
-      {label:'Promosi',data:mLabels.map(m=>(byMonth[m]||[]).filter(r=>r['Jenis Pengajuan']==='Promosi').length),backgroundColor:'#10B981bb',borderRadius:3},
-      {label:'Mutasi', data:mLabels.map(m=>(byMonth[m]||[]).filter(r=>r['Jenis Pengajuan']==='Mutasi').length), backgroundColor:'#3B82F6bb',borderRadius:3},
-      {label:'Demosi', data:mLabels.map(m=>(byMonth[m]||[]).filter(r=>r['Jenis Pengajuan']==='Demosi').length), backgroundColor:'#EF4444bb',borderRadius:3},
-    ]
-  },{plugins:{legend:{position:'bottom'}}});
-
-  const statusCt = {};
-  rows.forEach(r=>{const s=r['Status']||'—';statusCt[s]=(statusCt[s]||0)+1});
-  const stEnt = Object.entries(statusCt);
-  mkChart('cPromStatus','doughnut',{
-    labels: stEnt.map(e=>e[0]),
-    datasets:[{data:stEnt.map(e=>e[1]),backgroundColor:['#10B981','#6366F1','#EF4444','#9CA3AF'],borderWidth:0,hoverOffset:6}]
-  },{});
-
-  document.getElementById('tblPromMut').innerHTML = rows.slice(0,100).map(row=>`<tr>
-    <td>${coTag(row['PT']||'—')}</td>
-    <td>${row['Nama Karyawan']||'—'}</td>
-    <td>${row['Jabatan Lama']||'—'}</td>
-    <td>${row['Lokasi Lama']||'—'}</td>
-    <td>${statusTag(row['Jenis Pengajuan']||'—')}</td>
-    <td>${row['Jabatan Baru']||'—'}</td>
-    <td>${row['Lokasi Baru']||'—'}</td>
-    <td>${fmtD(row['Tanggal Efektif Perubahan'])}</td>
-    <td>${row['User']||'—'}</td>
-    <td>${statusTag(row['Status']||'—')}</td>
-  </tr>`).join('') || '<tr><td colspan="10" style="text-align:center;color:var(--text3)">Tidak ada data</td></tr>';
+function renderPengajuanReal(){
+  var rows=DS.pengajuan.filter(function(r){
+    var pt=getActivePT(); if(pt!=='ALL'&&r['PT']!==pt)return false;
+    var range=getDateRange(); var d=new Date(r['Timestamp']);
+    if(!isNaN(d.getTime())){var ym=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');if(range.from&&ym<range.from)return false;if(range.to&&ym>range.to)return false;}
+    return true;
+  });
+  var done=rows.filter(function(r){return r['Status']==='Done'}).length;
+  var pending=rows.filter(function(r){return !r['Status']||r['Status']===' '}).length;
+  setKPI('kpiPengTotal',rows.length); setKPI('kpiPengDone',done); setKPI('kpiPengPending',pending);
+  var katCt={}; rows.forEach(function(r){var k=normalizeKat(r['Kategori Pengajuan']);katCt[k]=(katCt[k]||0)+1;});
+  var katE=Object.entries(katCt).sort(function(a,b){return b[1]-a[1]});
+  mkChart('cPengajuanKat','bar',{labels:katE.map(function(e){return e[0]}),datasets:[{label:'Pengajuan',data:katE.map(function(e){return e[1]}),backgroundColor:'#6366F1bb',borderRadius:4}]},{indexAxis:'y',plugins:{legend:{display:false}}});
+  var ML=buildMonthLabels(); var byM=groupByMonth(rows,'Timestamp');
+  var katTrend=['PHK / Resign','Mutasi','SP 1','SP 2','Promosi'];
+  mkChart('cPengajuanTrend','line',{labels:ML,datasets:katTrend.map(function(k,i){return{label:k,data:ML.map(function(m){return (byM[m]||[]).filter(function(r){return normalizeKat(r['Kategori Pengajuan'])===k}).length}),borderColor:['#EF4444','#3B82F6','#F59E0B','#8B5CF6','#10B981'][i],backgroundColor:'transparent',tension:.4};})},{});
+  var karyCol='Nama Karyawan yang bersangkutan\n';
+  document.getElementById('tblPengajuan').innerHTML=rows.slice(0,100).map(function(row){
+    var nama=(row[karyCol]||row['Nama Karyawan yang bersangkutan']||'—').trim();
+    return '<tr><td>'+coTag(row['PT']||'—')+'</td><td>'+normalizeKat(row['Kategori Pengajuan'])+'</td><td>'+nama+'</td><td>'+(row['Jabatan Saat Ini']||'—')+'</td><td>'+(row['Penempatan Saat Ini']||'—')+'</td><td>'+fmtD(row['Timestamp'])+'</td><td>'+(row['Nama yang mengajukan']||'—')+'</td><td>'+statusTag(row['Status']||'Pending')+'</td></tr>';
+  }).join('')||'<tr><td colspan="8" style="text-align:center;color:var(--text3)">Tidak ada data</td></tr>';
 }
 
-/* ══════════════════════════════════════════════════
-   RENDER: JADWAL INTERVIEW (DS_Interview + Report_Interview)
-   DS_Interview kolom: Tanggal, HRD, Posisi, Nama, Jadwal, Keterangan, Status
-   Report_Interview kolom: Tanggal, Interviewer, Perusahaan, Posisi,
-                           Jenis Interview, Yang Diundang, Yang Konfirmasi, Yang Hadir
-══════════════════════════════════════════════════ */
-function renderInterviewFromSheets() {
-  const today  = new Date();
-  const in7    = new Date(today); in7.setDate(today.getDate()+7);
-  const ivRows = DS.interview.filter(r => {
-    const d = new Date(r['Tanggal']);
-    return !isNaN(d) && d >= today && d <= in7;
-  });
+function renderPromMutReal(){
+  var rows=filterRows(DS.prommut,'PT',' Date');
+  var prom=rows.filter(function(r){return r['Jenis Pengajuan']==='Promosi'});
+  var mut=rows.filter(function(r){return r['Jenis Pengajuan']==='Mutasi'});
+  var dem=rows.filter(function(r){return r['Jenis Pengajuan']==='Demosi'});
+  var prog=rows.filter(function(r){return r['Status']==='On Progress'});
+  setKPI('kpiPMTotal',rows.length); setKPI('kpiPMProm',prom.length);
+  setKPI('kpiPMMut',mut.length); setKPI('kpiPMDem',dem.length); setKPI('kpiPMProg',prog.length);
+  var ML=buildMonthLabels(); var byM=groupByMonth(rows,' Date');
+  mkChart('cPromMutPT','bar',{labels:ML,datasets:[
+    {label:'Promosi',data:ML.map(function(m){return (byM[m]||[]).filter(function(r){return r['Jenis Pengajuan']==='Promosi'}).length}),backgroundColor:'#10B981bb',borderRadius:3},
+    {label:'Mutasi', data:ML.map(function(m){return (byM[m]||[]).filter(function(r){return r['Jenis Pengajuan']==='Mutasi'}).length}),backgroundColor:'#3B82F6bb',borderRadius:3},
+    {label:'Demosi', data:ML.map(function(m){return (byM[m]||[]).filter(function(r){return r['Jenis Pengajuan']==='Demosi'}).length}),backgroundColor:'#EF4444bb',borderRadius:3}
+  ]},{plugins:{legend:{position:'bottom'}}});
+  var stCt={}; rows.forEach(function(r){var s=r['Status']||'—';stCt[s]=(stCt[s]||0)+1;});
+  var stE=Object.entries(stCt);
+  mkChart('cPromStatus','doughnut',{labels:stE.map(function(e){return e[0]}),datasets:[{data:stE.map(function(e){return e[1]}),backgroundColor:['#10B981','#6366F1','#EF4444','#9CA3AF'],borderWidth:0,hoverOffset:6}]},{});
+  document.getElementById('tblPromMut').innerHTML=rows.slice(0,100).map(function(row){
+    return '<tr><td>'+coTag(row['PT']||'—')+'</td><td>'+(row['Nama Karyawan']||'—')+'</td><td>'+(row['Jabatan Lama']||'—')+'</td><td>'+(row['Lokasi Lama']||'—')+'</td><td>'+statusTag(row['Jenis Pengajuan']||'—')+'</td><td>'+(row['Jabatan Baru']||'—')+'</td><td>'+(row['Lokasi Baru']||'—')+'</td><td>'+fmtD(row['Tanggal Efektif Perubahan'])+'</td><td>'+(row['User']||'—')+'</td><td>'+statusTag(row['Status']||'—')+'</td></tr>';
+  }).join('')||'<tr><td colspan="10" style="text-align:center;color:var(--text3)">Tidak ada data</td></tr>';
+}
 
-  const rep = DS.reportInt;
-  const totalUndang  = rep.reduce((s,r)=>s+(parseInt(r['Yang Diundang'])||0),0);
-  const totalKonfirm = rep.reduce((s,r)=>s+(parseInt(r['Yang Konfirmasi'])||0),0);
-  const totalHadir   = rep.reduce((s,r)=>s+(parseInt(r['Yang Hadir'])||0),0);
-  const showRate     = totalUndang ? ((totalHadir/totalUndang)*100).toFixed(0) : 0;
-
-  setKPI('kpiIvUpcoming',  ivRows.length);
-  setKPI('kpiIvConfirm',   ivRows.filter(r=>/confirm|ok/i.test(r['Status']||'')).length);
-  setKPI('kpiIvNoResp',    ivRows.filter(r=>/belum|no.?res/i.test(r['Status']||'')).length);
-  setKPI('kpiIvReschedule',ivRows.filter(r=>/reschedule/i.test(r['Status']||'')).length);
-  setKPI('kpiIvShowRate',  showRate + '%');
-
-  // List interview mendatang
-  const BLN=['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
-  document.getElementById('ivList').innerHTML = (ivRows.length ? ivRows : [{
-    Tanggal:'—',HRD:'—',Posisi:'Tidak ada jadwal mendatang',Nama:'',Status:'—'
-  }]).map(iv => {
-    const d = new Date(iv['Tanggal']);
-    const dateStr = isNaN(d) ? '—' : d.getDate();
-    const monStr  = isNaN(d) ? '' : BLN[d.getMonth()];
-    const st = iv['Status']||'—';
-    const stCls = /confirm|ok/i.test(st)?'tag-done':/reschedule/i.test(st)?'tag-hold':/belum|no.?res/i.test(st)?'tag-prog':'tag-hold';
-    return `<div class="iv-item">
-      <div class="iv-date"><div class="d">${dateStr}</div><div class="m">${monStr}</div></div>
-      <div class="iv-info">
-        <div class="iv-pos">${iv['Posisi']||'—'}</div>
-        <div class="iv-meta">${iv['Nama']||''} · ${iv['HRD']||''} · ${iv['Keterangan']||''}</div>
-      </div>
-      <span class="tag ${stCls} iv-badge">${st}</span>
-    </div>`;
+function renderInterviewReal(){
+  var today=new Date(); var in7=new Date(); in7.setDate(today.getDate()+7);
+  var ivRows=DS.interview.filter(function(r){var d=new Date(r['Tanggal']);return !isNaN(d.getTime())&&d>=today&&d<=in7;});
+  var rep=DS.reportInt;
+  var totalU=rep.reduce(function(s,r){return s+(parseInt(r['Yang Diundang'])||0)},0);
+  var totalH=rep.reduce(function(s,r){return s+(parseInt(r['Yang Hadir'])||0)},0);
+  var showR=totalU?Math.round(totalH/totalU*100):0;
+  setKPI('kpiIvUpcoming',ivRows.length);
+  setKPI('kpiIvConfirm',ivRows.filter(function(r){return /confirm|ok/i.test(r['Status']||'')}).length);
+  setKPI('kpiIvNoResp',ivRows.filter(function(r){return /belum|no.?res/i.test(r['Status']||'')}).length);
+  setKPI('kpiIvReschedule',ivRows.filter(function(r){return /reschedule/i.test(r['Status']||'')}).length);
+  setKPI('kpiIvShowRate',showR+'%');
+  document.getElementById('ivList').innerHTML=(ivRows.length?ivRows:[{Tanggal:'',Posisi:'Tidak ada jadwal mendatang',Nama:'',HRD:'',Keterangan:'',Status:'—'}]).map(function(iv){
+    var d=new Date(iv['Tanggal']); var dd=isNaN(d.getTime())?'—':d.getDate(); var dm=isNaN(d.getTime())?'':BLN[d.getMonth()];
+    var st=iv['Status']||'—'; var stCls=/confirm|ok/i.test(st)?'tag-done':/reschedule/i.test(st)?'tag-hold':/belum|no.?res/i.test(st)?'tag-prog':'tag-hold';
+    return '<div class="iv-item"><div class="iv-date"><div class="d">'+dd+'</div><div class="m">'+dm+'</div></div><div class="iv-info"><div class="iv-pos">'+(iv['Posisi']||'—')+'</div><div class="iv-meta">'+(iv['Nama']||'')+' · '+(iv['HRD']||'')+' · '+(iv['Keterangan']||'')+'</div></div><span class="tag '+stCls+' iv-badge">'+st+'</span></div>';
   }).join('');
-
-  // Chart: Diundang vs Konfirmasi vs Hadir
-  const mLabels = buildMonthLabels();
-  const repByM  = groupByMonth(rep, 'Tanggal');
-  mkChart('cIntReport','bar',{
-    labels: mLabels,
-    datasets:[
-      {label:'Diundang',    data:mLabels.map(m=>(repByM[m]||[]).reduce((s,r)=>s+(parseInt(r['Yang Diundang'])||0),0)),   backgroundColor:'#6366F166',borderRadius:3},
-      {label:'Konfirmasi',  data:mLabels.map(m=>(repByM[m]||[]).reduce((s,r)=>s+(parseInt(r['Yang Konfirmasi'])||0),0)), backgroundColor:'#3B82F6bb',borderRadius:3},
-      {label:'Hadir',       data:mLabels.map(m=>(repByM[m]||[]).reduce((s,r)=>s+(parseInt(r['Yang Hadir'])||0),0)),      backgroundColor:'#10B981',   borderRadius:3},
-    ]
-  },{plugins:{legend:{position:'bottom'}}});
-
-  // Chart: Posisi terbanyak
-  const posCt = {};
-  DS.interview.forEach(r=>{const p=r['Posisi']||'?';posCt[p]=(posCt[p]||0)+1});
-  const posEnt = Object.entries(posCt).sort((a,b)=>b[1]-a[1]).slice(0,8);
-  mkChart('cIntPos','bar',{
-    labels:posEnt.map(e=>e[0]),
-    datasets:[{label:'Interview',data:posEnt.map(e=>e[1]),backgroundColor:'#6366F1bb',borderRadius:4}]
-  },{indexAxis:'y',plugins:{legend:{display:false}}});
-
-  // Chart: show rate per PT
-  const pts = ['VVV','VVA','VLA','VCI','VMN'];
-  const ptShowRate = pts.map(pt => {
-    const ptRep = rep.filter(r=>r['Perusahaan']===pt);
-    const u = ptRep.reduce((s,r)=>s+(parseInt(r['Yang Diundang'])||0),0);
-    const h = ptRep.reduce((s,r)=>s+(parseInt(r['Yang Hadir'])||0),0);
-    return u ? Math.round((h/u)*100) : 0;
-  });
-  mkChart('cIntShow','bar',{
-    labels:pts,
-    datasets:[{label:'Show Rate %',data:ptShowRate,backgroundColor:pts.map(p=>CO_C[p]+'bb'),borderRadius:5}]
-  },{plugins:{legend:{display:false}},scales:{y:{max:100}}});
+  var ML=buildMonthLabels(); var repByM=groupByMonth(rep,'Tanggal');
+  mkChart('cIntReport','bar',{labels:ML,datasets:[
+    {label:'Diundang',  data:ML.map(function(m){return (repByM[m]||[]).reduce(function(s,r){return s+(parseInt(r['Yang Diundang'])||0)},0)}),  backgroundColor:'#6366F166',borderRadius:3},
+    {label:'Konfirmasi',data:ML.map(function(m){return (repByM[m]||[]).reduce(function(s,r){return s+(parseInt(r['Yang Konfirmasi'])||0)},0)}),backgroundColor:'#3B82F6bb',borderRadius:3},
+    {label:'Hadir',     data:ML.map(function(m){return (repByM[m]||[]).reduce(function(s,r){return s+(parseInt(r['Yang Hadir'])||0)},0)}),     backgroundColor:'#10B981',  borderRadius:3}
+  ]},{plugins:{legend:{position:'bottom'}}});
+  var posCt={}; DS.interview.forEach(function(r){var p=r['Posisi']||'?';posCt[p]=(posCt[p]||0)+1;});
+  var posE=Object.entries(posCt).sort(function(a,b){return b[1]-a[1]}).slice(0,8);
+  mkChart('cIntPos','bar',{labels:posE.map(function(e){return e[0]}),datasets:[{label:'Interview',data:posE.map(function(e){return e[1]}),backgroundColor:'#6366F1bb',borderRadius:4}]},{indexAxis:'y',plugins:{legend:{display:false}}});
+  mkChart('cIntShow','bar',{labels:CO,datasets:[{label:'Show Rate %',data:CO.map(function(p){var pr=rep.filter(function(r){return r['Perusahaan']===p});var u=pr.reduce(function(s,r){return s+(parseInt(r['Yang Diundang'])||0)},0);var h=pr.reduce(function(s,r){return s+(parseInt(r['Yang Hadir'])||0)},0);return u?Math.round(h/u*100):0;}),backgroundColor:CO.map(function(c){return CO_C[c]+'bb'}),borderRadius:5}]},{plugins:{legend:{display:false}},scales:{y:{max:100}}});
 }
 
-/* ══════════════════════════════════════════════════
-   RENDER: TURNOVER (Turnover_Summary)
-   Kolom: Bulan, PT, Jumlah_Awal, Join, Out,
-          Jumlah_Akhir, Rata-rata, Turnover_Rate
-══════════════════════════════════════════════════ */
-function renderTurnoverFromSheets() {
-  const rows = filterRows(DS.toSummary, 'PT', 'Bulan');
-
-  const totalOut  = rows.reduce((s,r)=>s+(parseInt(r['Out'])||0),0);
-  const totalJoin = rows.reduce((s,r)=>s+(parseInt(r['Join'])||0),0);
-  const rates     = rows.map(r=>parseFloat(r['Turnover_Rate'])||0).filter(v=>v>0);
-  const avgRate   = rates.length ? (rates.reduce((a,b)=>a+b,0)/rates.length*100).toFixed(2) : 0;
-
-  // Per PT avg rate
-  const ptAvg = CO.map(pt => {
-    const ptRows = rows.filter(r=>r['PT']===pt);
-    const ptRates = ptRows.map(r=>parseFloat(r['Turnover_Rate'])||0).filter(v=>v>0);
-    return { pt, avg: ptRates.length?(ptRates.reduce((a,b)=>a+b,0)/ptRates.length*100).toFixed(2):0 };
-  }).filter(x=>x.avg>0);
-
-  const highPT = ptAvg.sort((a,b)=>b.avg-a.avg)[0];
-  const lowPT  = [...ptAvg].sort((a,b)=>a.avg-b.avg)[0];
-
-  setKPI('kpiTOAvg',  avgRate + '%');
-  setKPI('kpiTOOut',  totalOut);
-  setKPI('kpiTOJoin', totalJoin);
-  setKPI('kpiTOHigh', highPT?.pt || '—');
-  setKPI('kpiTOLow',  lowPT?.pt  || '—');
-
-  const mLabels = buildMonthLabels();
-  const BLN=['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des'];
-  // Match Turnover_Summary 'Bulan' (bisa date string) ke label bulan
-  const rowByMonthPT = (pt, mLabel) => {
-    return rows.filter(r => {
-      if (r['PT'] !== pt) return false;
-      const d = new Date(r['Bulan']);
-      if (isNaN(d)) return false;
-      const lbl = BLN[d.getMonth()] + ' ' + String(d.getFullYear()).slice(2);
-      return lbl === mLabel;
-    });
-  };
-
-  mkChart('cTOTrend','line',{
-    labels: mLabels,
-    datasets: CO.filter(p=>rows.some(r=>r['PT']===p)).map(p => ({
-      label: p,
-      data: mLabels.map(m => {
-        const r2 = rowByMonthPT(p, m);
-        return r2.length ? (parseFloat(r2[0]['Turnover_Rate'])||0)*100 : null;
-      }),
-      borderColor: CO_C[p], backgroundColor:'transparent', tension:.4, pointRadius:3, spanGaps:true
-    }))
-  },{});
-
-  mkChart('cJoinOut','bar',{
-    labels: mLabels,
-    datasets:[
-      {label:'Join', data:mLabels.map(m=>rows.filter(r=>{const d=new Date(r['Bulan']);return !isNaN(d)&&BLN[d.getMonth()]+' '+String(d.getFullYear()).slice(2)===m}).reduce((s,r)=>s+(parseInt(r['Join'])||0),0)),backgroundColor:'#10B981bb',borderRadius:3},
-      {label:'Out',  data:mLabels.map(m=>rows.filter(r=>{const d=new Date(r['Bulan']);return !isNaN(d)&&BLN[d.getMonth()]+' '+String(d.getFullYear()).slice(2)===m}).reduce((s,r)=>s+(parseInt(r['Out'])||0),0)), backgroundColor:'#EF4444bb',borderRadius:3},
-    ]
-  },{plugins:{legend:{position:'bottom'}}});
-
-  document.getElementById('tblTurnover').innerHTML = rows.map(row => {
-    const rate = (parseFloat(row['Turnover_Rate'])||0)*100;
-    const cls  = rate>8?'badge-r':rate>5?'badge-y':'badge-g';
-    const d    = new Date(row['Bulan']);
-    const mLbl = isNaN(d) ? row['Bulan'] : BLN[d.getMonth()]+' '+d.getFullYear();
-    return `<tr>
-      <td>${mLbl}</td>
-      <td>${coTag(row['PT']||'—')}</td>
-      <td>${row['Jumlah_Awal']||'—'}</td>
-      <td>${row['Join']||0}</td>
-      <td>${row['Out']||0}</td>
-      <td>${row['Jumlah_Akhir']||'—'}</td>
-      <td>${parseFloat(row['Rata-rata']||0).toFixed(1)}</td>
-      <td><span class="kpi-badge ${cls}">${rate.toFixed(2)}%</span></td>
-      <td><div class="prog-bar" style="width:80px"><div class="prog-fill" style="width:${Math.min(rate*8,100)}%;background:${rate>8?'#EF4444':rate>5?'#F59E0B':'#10B981'}"></div></div></td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--text3)">Tidak ada data</td></tr>';
+function renderTurnoverReal(){
+  var rows=filterRows(DS.toSummary,'PT','Bulan');
+  var totalOut=rows.reduce(function(s,r){return s+(parseInt(r['Out'])||0)},0);
+  var totalJoin=rows.reduce(function(s,r){return s+(parseInt(r['Join'])||0)},0);
+  var rates=rows.map(function(r){return parseFloat(r['Turnover_Rate'])||0}).filter(function(v){return v>0});
+  var avgRate=rates.length?(rates.reduce(function(a,b){return a+b},0)/rates.length*100).toFixed(2):0;
+  var ptAvg=CO.map(function(p){
+    var pr=rows.filter(function(r){return r['PT']===p});
+    var ra=pr.map(function(r){return parseFloat(r['Turnover_Rate'])||0}).filter(function(v){return v>0});
+    return{pt:p,avg:ra.length?(ra.reduce(function(a,b){return a+b},0)/ra.length*100).toFixed(2):0};
+  }).filter(function(x){return x.avg>0}).sort(function(a,b){return b.avg-a.avg});
+  setKPI('kpiTOAvg',avgRate+'%'); setKPI('kpiTOOut',totalOut); setKPI('kpiTOJoin',totalJoin);
+  setKPI('kpiTOHigh',ptAvg[0]?ptAvg[0].pt:'—'); setKPI('kpiTOLow',ptAvg[ptAvg.length-1]?ptAvg[ptAvg.length-1].pt:'—');
+  var ML=buildMonthLabels();
+  mkChart('cTOTrend','line',{labels:ML,datasets:CO.filter(function(p){return rows.some(function(r){return r['PT']===p})}).map(function(p){return{label:p,data:ML.map(function(m){var row=rows.find(function(r){return r['PT']===p&&monthLabel(r['Bulan'])===m});return row?(parseFloat(row['Turnover_Rate'])||0)*100:null;}),borderColor:CO_C[p],backgroundColor:'transparent',tension:.4,pointRadius:3,spanGaps:true};})},{});
+  mkChart('cJoinOut','bar',{labels:ML,datasets:[
+    {label:'Join',data:ML.map(function(m){return rows.filter(function(r){return monthLabel(r['Bulan'])===m}).reduce(function(s,r){return s+(parseInt(r['Join'])||0)},0)}),backgroundColor:'#10B981bb',borderRadius:3},
+    {label:'Out', data:ML.map(function(m){return rows.filter(function(r){return monthLabel(r['Bulan'])===m}).reduce(function(s,r){return s+(parseInt(r['Out'])||0)},0)}), backgroundColor:'#EF4444bb',borderRadius:3}
+  ]},{plugins:{legend:{position:'bottom'}}});
+  document.getElementById('tblTurnover').innerHTML=rows.map(function(row){
+    var rate=(parseFloat(row['Turnover_Rate'])||0)*100; var cls=rate>8?'badge-r':rate>5?'badge-y':'badge-g';
+    var mLbl=monthLabel(row['Bulan'])||row['Bulan']||'—';
+    return '<tr><td>'+mLbl+'</td><td>'+coTag(row['PT']||'—')+'</td><td>'+(row['Jumlah_Awal']||'—')+'</td><td>'+(row['Join']||0)+'</td><td>'+(row['Out']||0)+'</td><td>'+(row['Jumlah_Akhir']||'—')+'</td><td>'+parseFloat(row['Rata-rata']||0).toFixed(1)+'</td><td><span class="kpi-badge '+cls+'">'+rate.toFixed(2)+'%</span></td><td><div class="prog-bar" style="width:80px"><div class="prog-fill" style="width:'+Math.min(rate*8,100)+'%;background:'+(rate>8?'#EF4444':rate>5?'#F59E0B':'#10B981')+'"></div></div></td></tr>';
+  }).join('')||'<tr><td colspan="9" style="text-align:center;color:var(--text3)">Tidak ada data</td></tr>';
 }
 
-/* ══════════════════════════════════════════════════
-   renderAllFromSheets — memanggil semua renderer real data
-══════════════════════════════════════════════════ */
-function renderAllFromSheets() {
-  // Render halaman yang sudah ada data nyata
-  if (DS.request.length)    renderReqFromSheets();     else renderReq();
-  if (DS.pelamar.length)    renderPelamarFromSheets();  else renderPelamar();
-  if (DS.pengajuan.length)  renderPengajuanFromSheets(); else { renderPengajuanCharts(); renderPengajuanTable(); }
-  if (DS.prommut.length)    renderPromMutFromSheets();  else renderPromMut();
-  if (DS.interview.length)  renderInterviewFromSheets(); else renderInterview();
-  if (DS.toSummary.length)  renderTurnoverFromSheets(); else renderTurnover();
-
-  // Absensi: belum ada sheet absensi di DS — tetap pakai demo
-  renderAbsOverview();
-  renderAbsManual();
-  renderAbsLupa();
-  renderAbsStatus();
+/* ════════════════════════════════════════════════
+   MASTER RENDER
+════════════════════════════════════════════════ */
+function renderAll(){
+  var hasData=Object.values(DS).some(function(a){return a.length>0});
+  if(hasData){
+    if(DS.request.length)   renderReqReal();    else renderReq();
+    if(DS.pelamar.length)   renderPelamarReal(); else renderPelamar();
+    if(DS.pengajuan.length){renderPengajuanReal();}else{renderPengajuanCharts();renderPengajuanTable();}
+    if(DS.prommut.length)   renderPromMutReal(); else renderPromMut();
+    if(DS.interview.length||DS.reportInt.length) renderInterviewReal(); else renderInterview();
+    if(DS.toSummary.length) renderTurnoverReal(); else renderTurnover();
+  } else {
+    renderReq(); renderPelamar(); renderPengajuanCharts(); renderPengajuanTable();
+    renderPromMut(); renderInterview(); renderTurnover();
+  }
+  renderAbsOverview(); renderAbsManual(); renderAbsLupa(); renderAbsStatus();
   renderTop10('terlambat');
 }
 
-// Override renderAll agar pakai data nyata kalau sudah dimuat
-const _renderAllDemo = renderAll;
-function renderAll() {
-  const hasRealData = Object.values(DS).some(arr => arr.length > 0);
-  if (hasRealData) renderAllFromSheets();
-  else {
-    renderReq(); renderPelamar();
-    renderPengajuanCharts(); renderPengajuanTable();
-    renderPromMut(); renderInterview(); renderTurnover();
-    renderAbsOverview(); renderAbsManual(); renderAbsLupa();
-    renderAbsStatus(); renderTop10('terlambat');
+/* ════════════════════════════════════════════════
+   DATA LOADER — Google Sheets via CSV
+════════════════════════════════════════════════ */
+function parseCSV(csvText){
+  var lines=csvText.trim().split('\n');
+  if(lines.length<2)return [];
+  function parseRow(line){
+    var result=[],cur='',inQ=false;
+    for(var i=0;i<line.length;i++){var ch=line[i];if(ch==='"'){inQ=!inQ;continue;}if(ch===','&&!inQ){result.push(cur.trim());cur='';continue;}cur+=ch;}
+    result.push(cur.trim()); return result;
   }
+  var headers=parseRow(lines[0]).map(function(h){return h.replace(/^"|"$/g,'')});
+  return lines.slice(1).map(function(line){
+    var vals=parseRow(line); var obj={};
+    headers.forEach(function(h,i){obj[h]=(vals[i]||'').replace(/^"|"$/g,'');});
+    return obj;
+  }).filter(function(row){return Object.values(row).some(function(v){return v!=='';});});
 }
 
-/* ════════════════════════════════════════════════
-   TOMBOL REFRESH di topbar
-════════════════════════════════════════════════ */
-function refreshData() {
-  // Reset DS
-  Object.keys(DS).forEach(k => DS[k] = []);
-  loadFromSheets();
+function sheetURL(key){
+  return 'https://docs.google.com/spreadsheets/d/'+SPREADSHEET_ID+'/gviz/tq?tqx=out:csv&sheet='+encodeURIComponent(SHEET_NAMES[key]);
 }
 
-/* ════════════════════════════════════════════════
-   INIT
-════════════════════════════════════════════════ */
-Chart.defaults.font.family = "'Inter', sans-serif";
+function setStatus(msg,type){
+  var bar=document.getElementById('_statusBar');
+  if(!bar){bar=document.createElement('div');bar.id='_statusBar';bar.style.cssText='position:fixed;bottom:16px;right:16px;z-index:9999;padding:10px 16px;border-radius:8px;font-size:12px;font-weight:500;box-shadow:0 4px 12px rgba(0,0,0,.25);font-family:Inter,sans-serif;max-width:340px;line-height:1.5;';document.body.appendChild(bar);}
+  var colors={info:{bg:'#1e2235',bc:'#3b4060',tc:'#a5b4fc'},success:{bg:'#052e16',bc:'#16a34a',tc:'#4ade80'},error:{bg:'#2d1515',bc:'#dc2626',tc:'#fca5a5'},loading:{bg:'#1e2235',bc:'#6366F1',tc:'#a5b4fc'}};
+  var c=colors[type]||colors.info;
+  bar.style.background=c.bg; bar.style.border='1px solid '+c.bc; bar.style.color=c.tc; bar.style.opacity='1';
+  bar.innerHTML=msg;
+  if(type==='success')setTimeout(function(){bar.style.opacity='0';},3500);
+}
 
-// Tambahkan tombol refresh ke topbar jika belum ada
-window.addEventListener('DOMContentLoaded', () => {
-  const tbRight = document.querySelector('.topbar');
-  if (tbRight && !document.getElementById('btnRefresh')) {
-    const btn = document.createElement('button');
-    btn.id = 'btnRefresh';
-    btn.style.cssText='height:30px;padding:0 14px;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.3);color:#6366F1;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;margin-left:8px;';
-    btn.innerHTML = '↻ Refresh';
-    btn.onclick = refreshData;
-    tbRight.appendChild(btn);
+async function loadFromSheets(){
+  if(!SPREADSHEET_ID){
+    setStatus('ℹ️ Mode Demo — isi <code>SPREADSHEET_ID</code> di baris 8 file HTML ini untuk connect ke Google Sheets.','info');
+    setTimeout(function(){var b=document.getElementById('_statusBar');if(b)b.style.opacity='0';},5000);
+    renderAll();
+    return;
   }
-});
+  setStatus('<span style="display:inline-block;animation:spin .7s linear infinite">⟳</span>&nbsp; Memuat data dari Google Sheets…','loading');
+  var keys=Object.keys(SHEET_NAMES);
+  var results=await Promise.allSettled(keys.map(async function(k){
+    var res=await fetch(sheetURL(k),{cache:'no-cache'});
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    var txt=await res.text();
+    return{key:k,data:parseCSV(txt)};
+  }));
+  var ok=0,fail=0;
+  results.forEach(function(r){
+    if(r.status==='fulfilled'&&r.value.data.length>0){DS[r.value.key]=r.value.data;ok++;}
+    else{fail++;console.warn('Gagal load sheet',keys[results.indexOf(r)],r.reason);}
+  });
+  if(ok===0){setStatus('❌ Semua sheet gagal dimuat. Pastikan Spreadsheet ID benar dan sudah di-publish ke web.','error');}
+  else if(fail>0){setStatus('⚠️ '+fail+' sheet gagal, '+ok+' berhasil dimuat.','error');}
+  else{setStatus('✅ '+ok+' sheets berhasil dimuat ('+new Date().toLocaleTimeString('id-ID')+')','success');}
+  renderAll();
+}
 
-// Mulai load
-loadFromSheets();
-
+/* ════════ INIT ════════ */
+Chart.defaults.font.family="'Inter',sans-serif";
+document.addEventListener('DOMContentLoaded',function(){loadFromSheets();});
+</script>
 </body>
 </html>
