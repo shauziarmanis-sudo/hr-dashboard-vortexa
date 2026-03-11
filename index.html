@@ -349,7 +349,7 @@
     <!-- Loading Overlay -->
     <div id="loader" class="loader-overlay">
         <div class="spinner"></div>
-        <p style="margin-top: 16px; font-weight: 500;">Loading live data...</p>
+        <p style="margin-top: 16px; font-weight: 500;">Loading data...</p>
     </div>
 
     <!-- Sidebar -->
@@ -606,18 +606,17 @@
         };
 
         // GOOGLE SHEETS CONFIGURATION
-        // To use live data, publish your Google Sheets as CSV (File -> Share -> Publish to web -> CSV)
-        // Then paste the URLs here and set USE_MOCK_DATA = false
+        // Untuk menggunakan data langsung, ganti tulisan 'PASTE_LINK_DISINI...' dengan URL CSV valid dari Google Sheets.
         const CONFIG = {
-            USE_MOCK_DATA: true, 
+            USE_MOCK_DATA: false, 
             SHEETS: {
-                request: "URL_CSV_DS_REQUEST",
-                pelamar: "URL_CSV_DS_PELAMAR",
-                pengajuan: "URL_CSV_DS_PENGAJUAN",
-                promMut: "URL_CSV_DS_PROMMUT",
-                turnover: "URL_CSV_DS_TURNOVER",
-                interview: "URL_CSV_DS_INTERVIEW",
-                headcount: "URL_CSV_HEADCOUNT"
+                request: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSRBg-uCffndPdB8J2lglvWxwLJZBEMZwDtFE4IjDZu2XGnGCPM9--PUtxYxIr9FBIVpughAP6bV5vX/pub?gid=1568575636&single=true&output=csv",
+                pelamar: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSRBg-uCffndPdB8J2lglvWxwLJZBEMZwDtFE4IjDZu2XGnGCPM9--PUtxYxIr9FBIVpughAP6bV5vX/pub?gid=1239326382&single=true&output=csv",
+                pengajuan: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSRBg-uCffndPdB8J2lglvWxwLJZBEMZwDtFE4IjDZu2XGnGCPM9--PUtxYxIr9FBIVpughAP6bV5vX/pub?gid=0&single=true&output=csv",
+                promMut: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSRBg-uCffndPdB8J2lglvWxwLJZBEMZwDtFE4IjDZu2XGnGCPM9--PUtxYxIr9FBIVpughAP6bV5vX/pub?gid=967000397&single=true&output=csv",
+                turnover: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSRBg-uCffndPdB8J2lglvWxwLJZBEMZwDtFE4IjDZu2XGnGCPM9--PUtxYxIr9FBIVpughAP6bV5vX/pub?gid=1601912407&single=true&output=csv",
+                interview: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSRBg-uCffndPdB8J2lglvWxwLJZBEMZwDtFE4IjDZu2XGnGCPM9--PUtxYxIr9FBIVpughAP6bV5vX/pub?gid=529683785&single=true&output=csv",
+                headcount: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSRBg-uCffndPdB8J2lglvWxwLJZBEMZwDtFE4IjDZu2XGnGCPM9--PUtxYxIr9FBIVpughAP6bV5vX/pub?gid=37074715&single=true&output=csv"
             }
         };
 
@@ -648,6 +647,7 @@
             document.getElementById('loader').style.display = 'flex';
             
             if (CONFIG.USE_MOCK_DATA) {
+                // Gunakan data simulasi jika USE_MOCK_DATA bernilai true
                 state.data = generateMockData();
                 setTimeout(() => {
                     document.getElementById('loader').style.display = 'none';
@@ -656,15 +656,31 @@
                 }, 800);
             } else {
                 try {
-                    // Example of real CSV fetching logic
+                    // Validasi: Cek apakah link yang dimasukkan sudah berupa URL HTTP yang sah
+                    // Jika masih berupa tulisan placeholder, tampilkan peringatan dan fallback ke mock data
+                    if (!CONFIG.SHEETS.request.startsWith('http')) {
+                        alert("⚠️ Tautan Google Sheets Belum Dimasukkan!\n\nPastikan Anda telah mengganti teks 'PASTE_LINK_DISINI...' di dalam konfigurasi dengan tautan CSV yang valid dari Google Sheets.\n\nUntuk sementara, dashboard akan menggunakan data simulasi (Mock Data) agar tidak terjadi error.");
+                        
+                        state.data = generateMockData();
+                        document.getElementById('loader').style.display = 'none';
+                        applyFilters();
+                        return;
+                    }
+
+                    // Menarik data asli dari CSV Google Sheets
                     state.data.request = await fetchCSV(CONFIG.SHEETS.request);
                     state.data.turnover = await fetchCSV(CONFIG.SHEETS.turnover);
-                    // ... fetch other sheets ...
+                    // Tambahkan fetch lainnya jika semua sheet sudah ada URL-nya...
+                    // state.data.pelamar = await fetchCSV(CONFIG.SHEETS.pelamar);
+                    // state.data.interview = await fetchCSV(CONFIG.SHEETS.interview);
+                    
                     document.getElementById('loader').style.display = 'none';
                     applyFilters();
+                    document.getElementById('last-updated').innerText = `Last updated: ${new Date().toLocaleTimeString()} (Live Data)`;
                 } catch (e) {
-                    alert("Error loading live data. Check console.");
+                    alert("Gagal memuat data live. Pastikan URL Google Sheets CSV dapat diakses publik.");
                     console.error(e);
+                    document.getElementById('loader').style.display = 'none';
                 }
             }
         }
@@ -716,12 +732,18 @@
 
         // 4. RENDERING ENGINE
         function renderDashboard() {
+            // Memastikan data tidak null (berjaga-jaga jika data asli belum lengkap / gagal di-fetch)
+            const requestData = state.data.request || [];
+            const turnoverData = state.data.turnover || [];
+            const pelamarData = state.data.pelamar || []; 
+            const promMutData = state.data.promMut || [];
+            const interviewData = state.data.interview || [];
+
             // Apply filters to datasets
-            const dReq = filterData(state.data.request, 'Timestamp', 'Perusahaan yang mengajukan');
-            const dTurn = filterData(state.data.turnover, 'Bulan', 'Perusahaan');
-            const dPelamar = state.data.pelamar; // Filter application rules differ slightly
-            const dPromMut = filterData(state.data.promMut, 'Date', 'PT');
-            const dInterview = filterData(state.data.interview, 'Tanggal', 'PT');
+            const dReq = filterData(requestData, 'Timestamp', 'Perusahaan yang mengajukan');
+            const dTurn = filterData(turnoverData, 'Bulan', 'Perusahaan');
+            const dPromMut = filterData(promMutData, 'Date', 'PT');
+            const dInterview = filterData(interviewData, 'Tanggal', 'PT');
             
             // Calculate Overview KPIs
             document.getElementById('kpi-req').innerText = dReq.reduce((sum, r) => sum + (Number(r['Jumlah yang dibutuhkan'])||0), 0);
@@ -737,7 +759,7 @@
 
             // Render Charts
             renderRequestStatusChart(dReq);
-            renderPelamarChart(dPelamar);
+            renderPelamarChart(pelamarData);
             renderReqCompanyChart(dReq);
             renderJoinOutChart(dTurn);
             renderTurnoverChart(dTurn, hc);
@@ -887,14 +909,17 @@
             
             sorted.forEach(row => {
                 const tr = document.createElement('tr');
-                let statusClass = row.Status === 'confirm' ? 'success' : (row.Status.includes('not') ? 'danger' : 'warning');
+                let statusClass = 'primary';
+                if (row.Status) {
+                   statusClass = row.Status.toLowerCase().includes('confirm') ? 'success' : (row.Status.toLowerCase().includes('not') ? 'danger' : 'warning');
+                }
                 tr.innerHTML = `
-                    <td>${row.Tanggal}</td>
+                    <td>${row.Tanggal || '-'}</td>
                     <td>${row.Jadwal || '-'}</td>
-                    <td><strong>${row.Nama}</strong><br><small style="color:var(--text-muted)">${row.PT || 'Umum'}</small></td>
-                    <td>${row.Posisi}</td>
-                    <td>${row.HRD}</td>
-                    <td><span class="badge ${statusClass}">${row.Status.toUpperCase()}</span></td>
+                    <td><strong>${row.Nama || '-'}</strong><br><small style="color:var(--text-muted)">${row.PT || 'Umum'}</small></td>
+                    <td>${row.Posisi || '-'}</td>
+                    <td>${row.HRD || '-'}</td>
+                    <td><span class="badge ${statusClass}">${row.Status ? row.Status.toUpperCase() : '-'}</span></td>
                 `;
                 tbody.appendChild(tr);
             });
